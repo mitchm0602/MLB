@@ -1,132 +1,99 @@
 import Anthropic from '@anthropic-ai/sdk';
 
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-  defaultHeaders: {
-    'anthropic-beta': 'interleaved-thinking-2025-05-14'
-  }
-});
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+const SYSTEM_PROMPT = `You are an elite MLB betting analyst. For every game you analyze, you MUST search the web to find current data before making predictions. Search for:
+1. Confirmed starting pitchers and their recent stats (last 3 starts, ERA, WHIP, strikeout rate)
+2. Full injury and IL reports for both teams
+3. Current season team stats (runs per game, team ERA, bullpen ERA, batting average, OPS)
+4. Win/loss records, last 10 games, home/away splits
+5. Head-to-head history this season
+6. Lineup news, day-of scratches, weather forecast for the ballpark
+7. Ballpark factors (run-friendly or pitcher-friendly)
+8. Any other relevant news (slumps, hot streaks, roster moves)
 
-  const { homeTeam, awayTeam, gameDate, spread } = req.body;
-
-  if (!homeTeam || !awayTeam) {
-    return res.status(400).json({ error: 'Home and away teams are required' });
-  }
-
-  const today = new Date().toISOString().split('T')[0];
-  const gameDateStr = gameDate || today;
-
-  const systemPrompt = `You are an elite MLB sports analyst and betting expert specializing in spread analysis. You have deep knowledge of:
-- Team statistics (batting average, ERA, WHIP, OPS, wRC+, FIP, xFIP)
-- Starting pitcher analysis and recent form
-- Bullpen strength and usage patterns
-- Injury reports and their impact on lineups
-- Home/away splits and ballpark factors
-- Head-to-head matchup history
-- Weather conditions and their effect on scoring
-- Recent team momentum and streaks
-- Lineup construction and platoon advantages
-- Advanced metrics like expected runs and run differential
-
-You MUST search the web for current, up-to-date information including:
-1. Today's injury reports and lineup updates
-2. Starting pitcher confirmed starters and recent outings
-3. Current team statistics and standings
-4. Recent head-to-head results
-5. Any relevant news that could affect the game outcome
-
-After gathering all information, provide a comprehensive betting analysis in the following JSON format ONLY (no markdown, no preamble):
+After thorough research, return ONLY a JSON object with NO markdown, NO backticks, NO preamble:
 {
-  "recommendation": "COVER" | "NO COVER" | "LEAN COVER" | "LEAN NO COVER" | "PASS",
-  "confidence": <number 1-100>,
-  "predictedScore": {
-    "home": <number>,
-    "away": <number>
+  "spread": {
+    "pick": "<AWAY TEAM NAME> | <HOME TEAM NAME> | PASS",
+    "pickSide": "away | home | pass",
+    "line": "<the spread line, e.g. -1.5>",
+    "confidence": <0-10>,
+    "edge": "<1-2 sentences on WHY this side covers>"
   },
-  "spreadAnalysis": "<2-3 sentence analysis of the spread>",
-  "keyFactors": [
-    {"factor": "<factor name>", "impact": "positive" | "negative" | "neutral", "detail": "<explanation>"},
-    ...
+  "total": {
+    "pick": "OVER | UNDER | PASS",
+    "line": <the O/U number as a float>,
+    "confidence": <0-10>,
+    "predictedRuns": <your predicted total runs as a float>,
+    "edge": "<1-2 sentences on WHY over or under>"
+  },
+  "predictedScore": { "away": <int>, "home": <int> },
+  "pitchers": {
+    "away": { "name": "<name or TBD>", "era": "<ERA>", "note": "<brief form note>" },
+    "home": { "name": "<name or TBD>", "era": "<ERA>", "note": "<brief form note>" }
+  },
+  "keyInjuries": [
+    { "team": "away | home", "player": "<name>", "status": "<IL/GTD/OUT>", "impact": "high | medium | low" }
   ],
-  "pitcherMatchup": {
-    "home": {"name": "<name>", "era": "<era>", "recentForm": "<summary>"},
-    "away": {"name": "<name>", "era": "<era>", "recentForm": "<summary>"}
-  },
-  "injuries": [
-    {"team": "<team>", "player": "<name>", "position": "<pos>", "status": "<status>", "impact": "high" | "medium" | "low"},
-    ...
+  "topFactors": [
+    { "label": "<short label>", "detail": "<one sentence>", "side": "away | home | over | under | neutral" }
   ],
   "teamStats": {
-    "home": {"record": "<W-L>", "lastTen": "<W-L>", "runsPerGame": "<avg>", "era": "<era>"},
-    "away": {"record": "<W-L>", "lastTen": "<W-L>", "runsPerGame": "<avg>", "era": "<era>"}
+    "away": { "record": "<W-L>", "last10": "<W-L>", "rpg": "<runs/game>", "era": "<team ERA>", "ops": "<OPS>" },
+    "home": { "record": "<W-L>", "last10": "<W-L>", "rpg": "<runs/game>", "era": "<team ERA>", "ops": "<OPS>" }
   },
-  "weatherImpact": "<weather and ballpark notes>",
-  "valueRating": <number 1-10>,
-  "summary": "<2-3 sentence executive summary of the pick>",
-  "dataTimestamp": "<current date/time of data>"
+  "weather": "<weather + ballpark factor note>",
+  "summary": "<3-4 sentence sharp analyst take on this game>"
 }`;
 
-  const userMessage = `Analyze the MLB matchup: ${awayTeam} @ ${homeTeam} on ${gameDateStr}.
-${spread ? `The spread is: ${homeTeam} ${spread}` : 'No spread provided - analyze the matchup generally.'}
+export default async function handler(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-Search for the latest injury reports, confirmed starting pitchers, recent team performance, and any breaking news about these teams. Then provide your complete betting analysis.`;
+  const { homeTeam, awayTeam, gameDate, homeSpread, total } = req.body;
+  if (!homeTeam || !awayTeam) return res.status(400).json({ error: 'Teams required' });
+
+  const dateStr = gameDate || new Date().toISOString().split('T')[0];
+  const spreadInfo = homeSpread != null ? `The current spread has ${homeTeam} at ${homeSpread > 0 ? '+' : ''}${homeSpread}. ` : '';
+  const totalInfo = total != null ? `The O/U total is ${total}. ` : '';
+
+  const userMessage = `Analyze: ${awayTeam} @ ${homeTeam} on ${dateStr}.
+${spreadInfo}${totalInfo}
+Search thoroughly for current injury reports, confirmed starters, recent form, stats, and weather. Then give your complete betting analysis JSON.`;
 
   try {
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-
+    // Use streaming internally but collect full response before returning
     const stream = await client.messages.stream({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 4000,
-      thinking: {
-        type: 'enabled',
-        budget_tokens: 2000
-      },
-      tools: [
-        {
-          type: 'web_search_20250305',
-          name: 'web_search'
-        }
-      ],
-      system: systemPrompt,
+      max_tokens: 3000,
+      tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+      system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userMessage }]
     });
 
     let fullText = '';
-    let searchQueries = [];
+    const searches = [];
 
     for await (const event of stream) {
       if (event.type === 'content_block_start') {
         if (event.content_block?.type === 'tool_use' && event.content_block?.name === 'web_search') {
-          const query = event.content_block?.input?.query || 'Searching...';
-          searchQueries.push(query);
-          res.write(`data: ${JSON.stringify({ type: 'search', query })}\n\n`);
+          searches.push(event.content_block?.input?.query || '');
         }
       }
-      if (event.type === 'content_block_delta') {
-        if (event.delta?.type === 'text_delta') {
-          fullText += event.delta.text;
-          res.write(`data: ${JSON.stringify({ type: 'text', text: event.delta.text })}\n\n`);
-        }
+      if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+        fullText += event.delta.text;
       }
     }
 
-    res.write(`data: ${JSON.stringify({ type: 'done', searches: searchQueries.length })}\n\n`);
-    res.end();
+    // Extract JSON
+    const jsonMatch = fullText.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('No JSON in response');
+    const result = JSON.parse(jsonMatch[0]);
+
+    res.status(200).json({ ...result, searches, analyzedAt: new Date().toISOString() });
 
   } catch (error) {
-    console.error('API Error:', error);
-    if (!res.headersSent) {
-      res.status(500).json({ error: error.message });
-    } else {
-      res.write(`data: ${JSON.stringify({ type: 'error', error: error.message })}\n\n`);
-      res.end();
-    }
+    console.error('Analyze error:', error.message);
+    res.status(500).json({ error: error.message });
   }
 }
