@@ -361,7 +361,7 @@ function GameCard({ game, odds, analysis, pending, formatTime }) {
       )}
 
       {analysis?.error && (
-        <div className={styles.picksError}>Analysis unavailable</div>
+        <div className={styles.picksError}>⚠ {analysis.error}{analysis.detail ? ': ' + analysis.detail : ''}</div>
       )}
 
       {analysis && !analysis.error && (
