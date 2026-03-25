@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Head from 'next/head';
+import Link from 'next/link';
 import styles from '../styles/Scoreboard.module.css';
 
 const REFRESH_INTERVAL = 30000;
@@ -98,6 +99,50 @@ export default function Scoreboard() {
           if (i > 0) await sleep(5000); // 5s between requests to avoid rate limits
           const result = await tasks[i]();
           setAnalysisMap(prev => ({ ...prev, [game.id]: result }));
+          // Auto-save picks to record tracker
+          if (result && !result.error) {
+            const picksToSave = [];
+            if (result.spread?.pickSide && result.spread.pickSide !== 'pass') {
+              picksToSave.push({
+                gameId: game.id,
+                gameDate: targetDate,
+                awayTeam: game.away.name,
+                homeTeam: game.home.name,
+                awayAbbrev: game.away.abbrev,
+                homeAbbrev: game.home.abbrev,
+                pickType: 'spread',
+                pick: result.spread.pick,
+                pickSide: result.spread.pickSide,
+                line: result.spread.line,
+                confidence: result.spread.confidence,
+                edge: result.spread.edge,
+                result: 'pending',
+              });
+            }
+            if (result.total?.pick && result.total.pick !== 'PASS') {
+              picksToSave.push({
+                gameId: game.id,
+                gameDate: targetDate,
+                awayTeam: game.away.name,
+                homeTeam: game.home.name,
+                awayAbbrev: game.away.abbrev,
+                homeAbbrev: game.home.abbrev,
+                pickType: 'total',
+                pick: result.total.pick,
+                line: result.total.line,
+                confidence: result.total.confidence,
+                edge: result.total.edge,
+                result: 'pending',
+              });
+            }
+            if (picksToSave.length) {
+              fetch('/api/picks', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ picks: picksToSave })
+              }).catch(() => {});
+            }
+          }
         } catch (e) {
           setAnalysisMap(prev => ({ ...prev, [game.id]: { error: e.message } }));
         }
@@ -192,12 +237,19 @@ export default function Scoreboard() {
       <div className={styles.app}>
         <header className={styles.header}>
           <div className={styles.headerInner}>
-            <div className={styles.logo}>
-              <span>⚾</span>
-              <div>
-                <div className={styles.logoTitle}>MLB EDGE</div>
-                <div className={styles.logoSub}>AI Betting Assistant</div>
+            <div className={styles.headerLeft}>
+              <div className={styles.logo}>
+                <span>⚾</span>
+                <div>
+                  <div className={styles.logoTitle}>MLB EDGE</div>
+                  <div className={styles.logoSub}>AI Betting Assistant</div>
+                </div>
               </div>
+              <nav className={styles.nav}>
+                <span className={styles.navActive}>Scoreboard</span>
+                <Link href="/best-bets" className={styles.navLink}>Best Bets</Link>
+                <Link href="/record" className={styles.navLink}>Record</Link>
+              </nav>
             </div>
             <div className={styles.headerRight}>
               {totalPending > 0 && (
