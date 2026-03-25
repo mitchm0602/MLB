@@ -3,7 +3,8 @@ import Head from 'next/head';
 import styles from '../styles/Scoreboard.module.css';
 
 const REFRESH_INTERVAL = 30000;
-const ANALYSIS_CONCURRENCY = 3; // analyze 3 games at a time
+const ANALYSIS_CONCURRENCY = 1; // one at a time to respect rate limits
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function matchTeams(mlbName, oddsGames) {
   if (!mlbName || !oddsGames.length) return null;
@@ -94,6 +95,7 @@ export default function Scoreboard() {
         const i = idx++;
         const game = pending[i];
         try {
+          if (i > 0) await sleep(5000); // 5s between requests to avoid rate limits
           const result = await tasks[i]();
           setAnalysisMap(prev => ({ ...prev, [game.id]: result }));
         } catch (e) {
