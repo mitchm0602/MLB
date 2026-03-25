@@ -558,3 +558,211 @@
   margin-right: -4px;
   flex-shrink: 0;
 }
+
+/* Expanded card */
+.expandedCard { border-color: var(--border2); }
+
+/* Analyze button states */
+.analyzeBtnActive {
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+  background: rgba(232, 249, 74, 0.05) !important;
+}
+.btnLoader {
+  width: 13px; height: 13px;
+  border: 2px solid rgba(255,255,255,0.2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* Analysis panel */
+.analysisPanel {
+  border-top: 1px solid var(--border2);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: fadeIn 0.25s ease forwards;
+}
+.searchFeed {
+  background: var(--surface2);
+  border-radius: 3px;
+  padding: 8px 10px;
+}
+.searchFeedLabel {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.searchItem {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  padding: 2px 0;
+  animation: fadeIn 0.2s ease forwards;
+}
+.analysisError {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--red);
+  padding: 6px 10px;
+  background: rgba(255,77,77,0.08);
+  border-radius: 3px;
+}
+
+/* Analysis result */
+.analysisResult {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pickHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.pickRec {
+  font-family: var(--font-display);
+  font-size: 30px;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.pickMeta { flex: 1; }
+.confRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.confLabel {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--muted);
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+.confBar {
+  flex: 1;
+  height: 3px;
+  background: var(--border2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.confFill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.8s ease;
+}
+.confNum {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  min-width: 32px;
+  text-align: right;
+}
+.valueRating {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--amber);
+  margin-top: 4px;
+}
+.summary {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+  border-left: 2px solid var(--accent);
+  padding-left: 8px;
+}
+
+/* Predicted score */
+.predScore {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface2);
+  border-radius: 3px;
+  padding: 8px 12px;
+}
+.predTeam {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+.predNum {
+  font-family: var(--font-display);
+  font-size: 28px;
+  color: var(--text);
+  line-height: 1;
+}
+.predDash {
+  font-family: var(--font-display);
+  font-size: 20px;
+  color: var(--muted2);
+}
+.predLabel {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--muted2);
+  letter-spacing: 0.1em;
+  margin-left: auto;
+}
+
+/* Factors */
+.factors, .injuries {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.factorsLabel {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--muted2);
+  letter-spacing: 0.1em;
+  margin-bottom: 2px;
+}
+.factor {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 12px;
+}
+.factorName { font-weight: 500; margin-bottom: 1px; }
+.factorDetail { color: var(--muted); font-size: 11px; line-height: 1.5; }
+
+/* Injuries */
+.injury {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+.injImpact { font-size: 10px; letter-spacing: 0.06em; font-weight: 500; min-width: 44px; }
+.injTeam { color: var(--muted); min-width: 28px; }
+.injPlayer { font-weight: 500; flex: 1; }
+.injStatus { color: var(--amber); font-size: 11px; }
+
+/* Spread note */
+.spreadNote {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+  font-style: italic;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+/* Color helpers */
+.recGreen { color: var(--green); }
+.recRed { color: var(--red); }
+.recAmber { color: var(--amber); }
+.recMuted { color: var(--muted); }
+
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes spin { to { transform: rotate(360deg); } }
