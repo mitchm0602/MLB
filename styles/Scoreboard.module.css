@@ -766,3 +766,206 @@
 
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* Header right */
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.analysisBadge {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+  background: rgba(232,249,74,0.08);
+  border: 1px solid rgba(232,249,74,0.2);
+  padding: 4px 10px;
+  border-radius: 3px;
+}
+.analysisDone {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--green);
+  letter-spacing: 0.06em;
+}
+
+/* Picks */
+.picksPending {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  padding: 8px 0 4px;
+  border-top: 1px solid var(--border);
+}
+.picksError {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted2);
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+.picksRow {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  margin-top: 4px;
+}
+.pickBox {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 8px;
+}
+.pickBox:first-child { padding-left: 0; }
+.pickBox:last-child { padding-right: 0; }
+.pickBoxLabel {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--muted2);
+  letter-spacing: 0.1em;
+}
+.pickBoxValue {
+  font-family: var(--font-display);
+  font-size: 20px;
+  letter-spacing: 0.04em;
+  line-height: 1.1;
+}
+.pickHighlight { color: var(--accent); }
+.pickPass { color: var(--muted); }
+.pickDivider {
+  width: 1px;
+  background: var(--border);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+.predScoreInline {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  padding-top: 2px;
+}
+.predDash { color: var(--muted2); }
+
+/* Confidence dots */
+.confDots {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 2px;
+}
+.confDot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.confScore {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  margin-left: 4px;
+}
+
+/* Detail toggle */
+.detailToggle {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  padding: 8px 0 0;
+  cursor: pointer;
+  text-align: left;
+  transition: color 0.15s;
+  margin-top: 8px;
+}
+.detailToggle:hover { color: var(--text); }
+
+/* Expanded detail */
+.expandedDetail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 10px;
+  animation: fadeIn 0.2s ease forwards;
+}
+.detailSection { display: flex; flex-direction: column; gap: 6px; }
+.detailLabel {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--muted2);
+  letter-spacing: 0.12em;
+}
+.pitcherRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.pitcher { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.pitcherTeam { font-family: var(--font-mono); font-size: 9px; color: var(--muted2); letter-spacing: 0.08em; }
+.pitcherName { font-size: 13px; font-weight: 500; }
+.pitcherEra { font-family: var(--font-mono); font-size: 11px; color: var(--accent2); }
+.pitcherNote { font-size: 11px; color: var(--muted); line-height: 1.4; }
+.pitcherVs { font-family: var(--font-display); font-size: 16px; color: var(--muted2); padding-top: 14px; flex-shrink: 0; }
+
+/* Stats table */
+.statsTable { width: 100%; border-collapse: collapse; font-size: 12px; }
+.statsTable th { font-family: var(--font-mono); font-size: 9px; color: var(--muted); text-align: right; padding: 3px 0; border-bottom: 1px solid var(--border); letter-spacing: 0.06em; }
+.statsTable th:first-child { text-align: left; }
+.statsTable td { padding: 5px 0; text-align: right; border-bottom: 1px solid var(--border); font-family: var(--font-mono); font-size: 11px; }
+.statsTable td:first-child { text-align: left; color: var(--muted); }
+
+/* Injuries */
+.injuryRow { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 4px 0; border-bottom: 1px solid var(--border); }
+.injImpact { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.06em; font-weight: 500; min-width: 40px; }
+.impactHigh { color: var(--red); }
+.impactMed { color: var(--amber); }
+.impactLow { color: var(--muted); }
+.injTeam { font-family: var(--font-mono); font-size: 10px; color: var(--muted); min-width: 28px; }
+.injPlayer { font-weight: 500; flex: 1; }
+.injStatus { font-family: var(--font-mono); font-size: 10px; color: var(--amber); }
+
+/* Factors */
+.factorRow { display: flex; align-items: flex-start; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.factorSide { font-family: var(--font-mono); font-size: 10px; font-weight: 500; letter-spacing: 0.04em; min-width: 60px; padding-top: 1px; }
+.factorGreen { color: var(--green); }
+.factorRed { color: var(--red); }
+.factorNeutral { color: var(--muted); }
+.factorDetail { color: var(--muted); line-height: 1.5; flex: 1; }
+
+/* Edge boxes */
+.edgeRow { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.edgeBox { background: var(--surface2); border-radius: 3px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
+.edgeText { font-size: 12px; color: var(--muted); line-height: 1.5; margin: 0; }
+
+/* Weather */
+.weatherText { font-family: var(--font-mono); font-size: 11px; color: var(--muted); line-height: 1.5; margin: 0; }
+
+/* Summary */
+.summaryBox {
+  background: var(--surface2);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 3px 3px 0;
+  padding: 8px 12px;
+}
+.summaryBox p { font-size: 12px; color: var(--text); line-height: 1.6; margin: 0; }
+
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes spin { to { transform: rotate(360deg); } }
