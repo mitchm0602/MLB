@@ -1,9 +1,13 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "package.json",
-      "use": "@vercel/next"
+  "functions": {
+    "pages/api/analyze.js": {
+      "maxDuration": 60
+    },
+    "pages/api/scores.js": {
+      "maxDuration": 15
+    },
+    "pages/api/odds.js": {
+      "maxDuration": 15
     }
-  ]
+  }
 }
