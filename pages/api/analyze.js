@@ -2,49 +2,47 @@ import Anthropic from '@anthropic-ai/sdk';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const SYSTEM_PROMPT = `You are an elite MLB betting analyst. For every game you analyze, you MUST search the web to find current data before making predictions. Search for:
-1. Confirmed starting pitchers and their recent stats (last 3 starts, ERA, WHIP, strikeout rate)
-2. Full injury and IL reports for both teams
-3. Current season team stats (runs per game, team ERA, bullpen ERA, batting average, OPS)
-4. Win/loss records, last 10 games, home/away splits
-5. Head-to-head history this season
-6. Lineup news, day-of scratches, weather forecast for the ballpark
-7. Ballpark factors (run-friendly or pitcher-friendly)
-8. Any other relevant news (slumps, hot streaks, roster moves)
+const SYSTEM_PROMPT = `You are an elite MLB betting analyst. For every game you analyze, you MUST use the web_search tool to find current data. Run at least 4 searches covering:
+1. Starting pitchers confirmed + recent stats for both teams
+2. Injury and IL reports for both teams  
+3. Current season team stats, records, last 10 games
+4. Recent news, lineup updates, weather forecast
 
-After thorough research, return ONLY a JSON object with NO markdown, NO backticks, NO preamble:
+After researching, return ONLY a raw JSON object. No markdown. No backticks. No text before or after. Start your response with { and end with }.
+
+Required format:
 {
   "spread": {
-    "pick": "<AWAY TEAM NAME> | <HOME TEAM NAME> | PASS",
-    "pickSide": "away | home | pass",
-    "line": "<the spread line, e.g. -1.5>",
-    "confidence": <0-10>,
-    "edge": "<1-2 sentences on WHY this side covers>"
+    "pick": "AWAY_TEAM_NAME or HOME_TEAM_NAME or PASS",
+    "pickSide": "away or home or pass",
+    "line": "-1.5 or +1.5 etc",
+    "confidence": 7,
+    "edge": "One or two sentences explaining why."
   },
   "total": {
-    "pick": "OVER | UNDER | PASS",
-    "line": <the O/U number as a float>,
-    "confidence": <0-10>,
-    "predictedRuns": <your predicted total runs as a float>,
-    "edge": "<1-2 sentences on WHY over or under>"
+    "pick": "OVER or UNDER or PASS",
+    "line": 8.5,
+    "confidence": 6,
+    "predictedRuns": 9.2,
+    "edge": "One or two sentences explaining why."
   },
-  "predictedScore": { "away": <int>, "home": <int> },
+  "predictedScore": { "away": 4, "home": 3 },
   "pitchers": {
-    "away": { "name": "<name or TBD>", "era": "<ERA>", "note": "<brief form note>" },
-    "home": { "name": "<name or TBD>", "era": "<ERA>", "note": "<brief form note>" }
+    "away": { "name": "Pitcher Name", "era": "3.45", "note": "Brief recent form." },
+    "home": { "name": "Pitcher Name", "era": "2.98", "note": "Brief recent form." }
   },
   "keyInjuries": [
-    { "team": "away | home", "player": "<name>", "status": "<IL/GTD/OUT>", "impact": "high | medium | low" }
+    { "team": "away", "player": "Player Name", "status": "IL10", "impact": "high" }
   ],
   "topFactors": [
-    { "label": "<short label>", "detail": "<one sentence>", "side": "away | home | over | under | neutral" }
+    { "label": "Factor Label", "detail": "One sentence detail.", "side": "home" }
   ],
   "teamStats": {
-    "away": { "record": "<W-L>", "last10": "<W-L>", "rpg": "<runs/game>", "era": "<team ERA>", "ops": "<OPS>" },
-    "home": { "record": "<W-L>", "last10": "<W-L>", "rpg": "<runs/game>", "era": "<team ERA>", "ops": "<OPS>" }
+    "away": { "record": "15-10", "last10": "7-3", "rpg": "4.8", "era": "3.92", "ops": ".742" },
+    "home": { "record": "12-13", "last10": "5-5", "rpg": "4.1", "era": "4.21", "ops": ".718" }
   },
-  "weather": "<weather + ballpark factor note>",
-  "summary": "<3-4 sentence sharp analyst take on this game>"
+  "weather": "Clear, 72F, wind 8mph out to center. Hitter-friendly conditions.",
+  "summary": "3-4 sentence sharp analyst take on this game."
 }`;
 
 export default async function handler(req, res) {
@@ -54,46 +52,59 @@ export default async function handler(req, res) {
   if (!homeTeam || !awayTeam) return res.status(400).json({ error: 'Teams required' });
 
   const dateStr = gameDate || new Date().toISOString().split('T')[0];
-  const spreadInfo = homeSpread != null ? `The current spread has ${homeTeam} at ${homeSpread > 0 ? '+' : ''}${homeSpread}. ` : '';
-  const totalInfo = total != null ? `The O/U total is ${total}. ` : '';
+  const spreadInfo = homeSpread != null ? `The current spread: ${homeTeam} ${homeSpread > 0 ? '+' : ''}${homeSpread}.` : 'No spread available.';
+  const totalInfo = total != null ? `The O/U total: ${total}.` : 'No total available.';
 
-  const userMessage = `Analyze: ${awayTeam} @ ${homeTeam} on ${dateStr}.
-${spreadInfo}${totalInfo}
-Search thoroughly for current injury reports, confirmed starters, recent form, stats, and weather. Then give your complete betting analysis JSON.`;
+  const userMessage = `Analyze this MLB game: ${awayTeam} (away) @ ${homeTeam} (home) on ${dateStr}.
+${spreadInfo} ${totalInfo}
+Search for current injuries, confirmed starters, team stats, and recent form. Return only the JSON.`;
 
   try {
-    // Use streaming internally but collect full response before returning
-    const stream = await client.messages.stream({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 3000,
+    const message = await client.messages.create({
+      model: 'claude-sonnet-4-5',
+      max_tokens: 4000,
       tools: [{ type: 'web_search_20250305', name: 'web_search' }],
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userMessage }]
     });
 
+    // Collect all text blocks from response
     let fullText = '';
     const searches = [];
 
-    for await (const event of stream) {
-      if (event.type === 'content_block_start') {
-        if (event.content_block?.type === 'tool_use' && event.content_block?.name === 'web_search') {
-          searches.push(event.content_block?.input?.query || '');
-        }
-      }
-      if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
-        fullText += event.delta.text;
+    for (const block of message.content) {
+      if (block.type === 'text') fullText += block.text;
+      if (block.type === 'tool_use' && block.name === 'web_search') {
+        searches.push(block.input?.query || '');
       }
     }
 
-    // Extract JSON
+    // Strip any markdown fences just in case
+    fullText = fullText.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+
+    // Extract JSON object
     const jsonMatch = fullText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('No JSON in response');
-    const result = JSON.parse(jsonMatch[0]);
+    if (!jsonMatch) {
+      console.error('No JSON found. Raw response:', fullText.slice(0, 500));
+      return res.status(500).json({ error: 'No JSON in response', raw: fullText.slice(0, 300) });
+    }
+
+    let result;
+    try {
+      result = JSON.parse(jsonMatch[0]);
+    } catch (parseErr) {
+      console.error('JSON parse error:', parseErr.message, jsonMatch[0].slice(0, 300));
+      return res.status(500).json({ error: 'JSON parse failed: ' + parseErr.message });
+    }
 
     res.status(200).json({ ...result, searches, analyzedAt: new Date().toISOString() });
 
   } catch (error) {
-    console.error('Analyze error:', error.message);
-    res.status(500).json({ error: error.message });
+    console.error('Analyze API error:', error.message, error.status, error.error);
+    res.status(500).json({
+      error: error.message,
+      status: error.status,
+      detail: error.error?.error?.message || ''
+    });
   }
 }
