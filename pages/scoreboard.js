@@ -37,9 +37,10 @@ export default function Scoreboard() {
 
   const fetchAll = useCallback(async (targetDate) => {
     const isToday = targetDate === new Date().toISOString().split('T')[0];
+    const isPast = targetDate < new Date().toISOString().split('T')[0];
     const [scoresRes, oddsRes] = await Promise.allSettled([
       fetch(`/api/scores?date=${targetDate}`).then(r => r.json()),
-      isToday ? fetch('/api/odds').then(r => r.json()) : Promise.resolve({ odds: [] }),
+      !isPast ? fetch('/api/odds').then(r => r.json()) : Promise.resolve({ odds: [] }),
     ]);
 
     if (scoresRes.status === 'fulfilled' && !scoresRes.value.error) {
