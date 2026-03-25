@@ -446,3 +446,115 @@
   .nav { display: none; }
   .venue { display: none; }
 }
+
+/* Odds */
+.oddsRemaining {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--muted2);
+  letter-spacing: 0.04em;
+}
+.oddsWarning {
+  padding: 8px 14px;
+  background: rgba(249, 168, 58, 0.08);
+  border: 1px solid rgba(249, 168, 58, 0.25);
+  color: var(--amber);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  border-radius: 3px;
+}
+.oddsLink {
+  color: var(--accent2);
+  text-decoration: underline;
+}
+
+/* Team row with odds */
+.teamRight {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.oddsCol {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 48px;
+}
+.oddsML {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+}
+.oddsSpread {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent2);
+}
+.oddsHeader {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: -6px;
+  margin-bottom: 2px;
+  padding-right: 2px;
+}
+.oddsHeaderLabel {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--muted2);
+  letter-spacing: 0.08em;
+  min-width: 48px;
+  text-align: right;
+}
+
+/* O/U divider */
+.dividerRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0;
+}
+.dividerRow .teamDivider {
+  flex: 1;
+  height: 0.5px;
+  background: var(--border);
+}
+.totalBadge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  padding: 2px 8px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.totalLabel {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--muted2);
+  letter-spacing: 0.08em;
+}
+.totalVal {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--accent);
+}
+.totalOdds {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--muted);
+}
+
+/* Favored indicator */
+.favoredDot {
+  font-size: 7px;
+  color: var(--accent);
+  margin-right: -4px;
+  flex-shrink: 0;
+}
