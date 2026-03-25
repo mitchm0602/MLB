@@ -1,5 +1,7 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Head from 'next/head';
+import Link from 'next/link';
+import { useRouter } from 'next/router';
 import styles from '../styles/Home.module.css';
 
 const MLB_TEAMS = [
@@ -27,11 +29,17 @@ const TEAM_ABBREV = {
 };
 
 export default function Home() {
+  const router = useRouter();
   const [homeTeam, setHomeTeam] = useState('');
   const [awayTeam, setAwayTeam] = useState('');
   const [spread, setSpread] = useState('');
   const [gameDate, setGameDate] = useState(new Date().toISOString().split('T')[0]);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (router.query.home) setHomeTeam(router.query.home);
+    if (router.query.away) setAwayTeam(router.query.away);
+  }, [router.query]);
   const [result, setResult] = useState(null);
   const [searches, setSearches] = useState([]);
   const [rawText, setRawText] = useState('');
@@ -153,6 +161,10 @@ export default function Home() {
                 <div className={styles.logoSub}>AI Spread Analyzer</div>
               </div>
             </div>
+            <nav className={styles.nav}>
+              <span className={styles.navLinkActive}>Analyzer</span>
+              <Link href="/scoreboard" className={styles.navLink}>Scoreboard</Link>
+            </nav>
             <div className={styles.headerBadge}>
               <span className={styles.liveDot}></span>
               LIVE DATA
