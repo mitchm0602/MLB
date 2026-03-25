@@ -5,23 +5,33 @@ export default async function handler(req, res) {
 
   try {
     const { date } = req.query;
-
-    // Use provided date or today
     const targetDate = date || new Date().toISOString().split('T')[0];
-    const formattedDate = targetDate.replace(/-/g, '/'); // MLB API uses YYYY/MM/DD
 
-    const mlbUrl = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${formattedDate}&hydrate=team,linescore,game(content(editorial(recap))),probablePitcher,weather,broadcasts`;
+    // Simplified hydrate string - avoid complex nested params that MLB API rejects
+    const mlbUrl = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${targetDate}&hydrate=team,linescore,probablePitcher,weather`;
 
-    const response = await fetch(mlbUrl, {
-      headers: { 'User-Agent': 'MLB-Edge-App/1.0' }
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+
+    let response;
+    try {
+      response = await fetch(mlbUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; MLB-Edge/1.0)',
+          'Accept': 'application/json',
+        },
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!response.ok) {
-      throw new Error(`MLB API responded with ${response.status}`);
+      const body = await response.text().catch(() => '');
+      throw new Error(`MLB API error ${response.status}: ${body.slice(0, 200)}`);
     }
 
     const data = await response.json();
-
     const games = [];
 
     for (const dateEntry of (data.dates || [])) {
@@ -32,7 +42,7 @@ export default async function handler(req, res) {
         const away = teams.away || {};
         const weather = game.weather || {};
 
-        const gameObj = {
+        games.push({
           id: game.gamePk,
           status: mapStatus(game.status?.abstractGameState, game.status?.detailedState),
           detailedStatus: game.status?.detailedState || '',
@@ -47,10 +57,9 @@ export default async function handler(req, res) {
             abbrev: home.team?.abbreviation || '',
             score: home.score ?? null,
             record: home.leagueRecord ? `${home.leagueRecord.wins}-${home.leagueRecord.losses}` : '',
-            probablePitcher: home.probablePitcher ? {
-              name: home.probablePitcher.fullName,
-              era: home.probablePitcher.stats?.[0]?.stats?.era || '—'
-            } : null,
+            probablePitcher: home.probablePitcher
+              ? { name: home.probablePitcher.fullName, era: '—' }
+              : null,
             hits: linescore.teams?.home?.hits ?? null,
             errors: linescore.teams?.home?.errors ?? null,
           },
@@ -60,10 +69,9 @@ export default async function handler(req, res) {
             abbrev: away.team?.abbreviation || '',
             score: away.score ?? null,
             record: away.leagueRecord ? `${away.leagueRecord.wins}-${away.leagueRecord.losses}` : '',
-            probablePitcher: away.probablePitcher ? {
-              name: away.probablePitcher.fullName,
-              era: away.probablePitcher.stats?.[0]?.stats?.era || '—'
-            } : null,
+            probablePitcher: away.probablePitcher
+              ? { name: away.probablePitcher.fullName, era: '—' }
+              : null,
             hits: linescore.teams?.away?.hits ?? null,
             errors: linescore.teams?.away?.errors ?? null,
           },
@@ -73,13 +81,10 @@ export default async function handler(req, res) {
           onFirst: !!linescore.offense?.first,
           onSecond: !!linescore.offense?.second,
           onThird: !!linescore.offense?.third,
-        };
-
-        games.push(gameObj);
+        });
       }
     }
 
-    // Sort: live first, then scheduled by time, then final
     games.sort((a, b) => {
       const order = { live: 0, scheduled: 1, final: 2 };
       const ao = order[a.status] ?? 3;
@@ -92,7 +97,7 @@ export default async function handler(req, res) {
     res.status(200).json({ games, date: targetDate, fetchedAt: new Date().toISOString() });
 
   } catch (error) {
-    console.error('Scores API error:', error);
+    console.error('Scores API error:', error.message);
     res.status(500).json({ error: error.message });
   }
 }
