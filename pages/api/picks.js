@@ -1,102 +1,82 @@
-import fs from 'fs';
-import path from 'path';
+import { Redis } from '@upstash/redis';
 
-// On Vercel, /tmp is the only writable directory
-const DATA_FILE = path.join('/tmp', 'mlb-picks.json');
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN,
+});
 
-function loadData() {
+const PICKS_KEY = 'mlb:picks';
+
+async function loadPicks() {
   try {
-    if (fs.existsSync(DATA_FILE)) {
-      return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-    }
+    const data = await redis.get(PICKS_KEY);
+    return data || [];
   } catch (e) {
-    console.error('Load error:', e.message);
+    console.error('Redis load error:', e.message);
+    return [];
   }
-  return { picks: [] };
 }
 
-function saveData(data) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+async function savePicks(picks) {
+  await redis.set(PICKS_KEY, picks);
 }
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
   if (req.method === 'GET') {
-    const data = loadData();
+    const picks = await loadPicks();
     const { date, status } = req.query;
 
-    let picks = data.picks || [];
-    if (date) picks = picks.filter(p => p.gameDate === date);
-    if (status) picks = picks.filter(p => p.result === status);
+    let filtered = picks;
+    if (date) filtered = filtered.filter(p => p.gameDate === date);
+    if (status) filtered = filtered.filter(p => p.result === status);
 
-    // Compute summary stats
-    const graded = picks.filter(p => p.result && p.result !== 'pending');
+    const graded = picks.filter(p => p.result && !['pending','pass'].includes(p.result));
     const wins = graded.filter(p => p.result === 'win').length;
     const losses = graded.filter(p => p.result === 'loss').length;
     const pushes = graded.filter(p => p.result === 'push').length;
 
-    // Group by date
     const byDate = {};
-    for (const pick of picks) {
+    for (const pick of filtered) {
       if (!byDate[pick.gameDate]) byDate[pick.gameDate] = [];
       byDate[pick.gameDate].push(pick);
     }
 
     return res.status(200).json({
-      picks,
+      picks: filtered,
       byDate,
-      stats: { wins, losses, pushes, total: graded.length, pending: picks.filter(p => !p.result || p.result === 'pending').length }
+      stats: {
+        wins, losses, pushes,
+        total: graded.length,
+        pending: picks.filter(p => p.result === 'pending').length
+      }
     });
   }
 
   if (req.method === 'POST') {
-    // Save a new pick or batch of picks
     const { picks: newPicks } = req.body;
     if (!Array.isArray(newPicks)) return res.status(400).json({ error: 'picks array required' });
 
-    const data = loadData();
+    const existing = await loadPicks();
 
     for (const pick of newPicks) {
-      // Deduplicate by gameId + pickType
-      const existing = data.picks.findIndex(p => p.gameId === pick.gameId && p.pickType === pick.pickType);
-      if (existing >= 0) {
-        // Update existing (preserve result if already graded)
-        data.picks[existing] = { ...data.picks[existing], ...pick };
+      const idx = existing.findIndex(p => p.gameId === pick.gameId && p.pickType === pick.pickType);
+      if (idx >= 0) {
+        if (existing[idx].result === 'pending') {
+          existing[idx] = { ...existing[idx], ...pick };
+        }
       } else {
-        data.picks.push({
-          ...pick,
-          result: pick.result || 'pending',
-          savedAt: new Date().toISOString()
-        });
+        existing.push({ ...pick, result: pick.result || 'pending', savedAt: new Date().toISOString() });
       }
     }
 
-    saveData(data);
-    return res.status(200).json({ saved: newPicks.length, total: data.picks.length });
-  }
-
-  if (req.method === 'PATCH') {
-    // Grade a pick: { gameId, pickType, result: 'win'|'loss'|'push', actualScore }
-    const { gameId, pickType, result, actualAway, actualHome } = req.body;
-    if (!gameId || !pickType || !result) return res.status(400).json({ error: 'gameId, pickType, result required' });
-
-    const data = loadData();
-    const idx = data.picks.findIndex(p => p.gameId === gameId && p.pickType === pickType);
-    if (idx === -1) return res.status(404).json({ error: 'Pick not found' });
-
-    data.picks[idx].result = result;
-    data.picks[idx].actualAway = actualAway;
-    data.picks[idx].actualHome = actualHome;
-    data.picks[idx].gradedAt = new Date().toISOString();
-
-    saveData(data);
-    return res.status(200).json({ updated: data.picks[idx] });
+    await savePicks(existing);
+    return res.status(200).json({ saved: newPicks.length, total: existing.length });
   }
 
   if (req.method === 'DELETE') {
-    // Clear all picks (admin reset)
-    saveData({ picks: [] });
+    await savePicks([]);
     return res.status(200).json({ cleared: true });
   }
 
