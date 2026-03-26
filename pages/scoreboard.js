@@ -6,6 +6,26 @@ import styles from '../styles/Scoreboard.module.css';
 const REFRESH_INTERVAL = 30000;
 const ANALYSIS_CONCURRENCY = 1; // one at a time to respect rate limits
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+const CACHE_KEY = date => `mlb-analysis-${date}`;
+const CACHE_TTL = 18 * 60 * 60 * 1000; // 18 hours
+
+function loadCachedAnalysis(date) {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY(date));
+    if (!raw) return null;
+    const { data, savedAt } = JSON.parse(raw);
+    if (Date.now() - savedAt > CACHE_TTL) { localStorage.removeItem(CACHE_KEY(date)); return null; }
+    return data;
+  } catch { return null; }
+}
+
+function saveCachedAnalysis(date, analysisMap) {
+  try { localStorage.setItem(CACHE_KEY(date), JSON.stringify({ data: analysisMap, savedAt: Date.now() })); } catch {}
+}
+
+function clearCachedAnalysis(date) {
+  try { localStorage.removeItem(CACHE_KEY(date)); } catch {}
+}
 
 function matchTeams(mlbName, oddsGames) {
   if (!mlbName || !oddsGames.length) return null;
@@ -50,7 +70,7 @@ export default function Scoreboard() {
   const [analysisMap, setAnalysisMap] = useState({});
   const [analysisPending, setAnalysisPending] = useState(new Set());
   const [oddsError, setOddsError] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(null); // set client-side in useEffect to avoid timezone issues
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [fetchedAt, setFetchedAt] = useState(null);
@@ -60,6 +80,13 @@ export default function Scoreboard() {
   const [analysisDate, setAnalysisDate] = useState(null);
   const timerRef = useRef(null);
   const countdownRef = useRef(null);
+
+  // Set today's date client-side to avoid SSR timezone mismatch
+  useEffect(() => {
+    const now = new Date();
+    const localDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+    setDate(localDate);
+  }, []);
 
   const runAnalysisForGames = useCallback(async (fetchedGames, oddsData, targetDate) => {
     const isPast = targetDate < new Date().toISOString().split('T')[0];
@@ -98,7 +125,11 @@ export default function Scoreboard() {
         try {
           if (i > 0) await sleep(5000); // 5s between requests to avoid rate limits
           const result = await tasks[i]();
-          setAnalysisMap(prev => ({ ...prev, [game.id]: result }));
+          setAnalysisMap(prev => {
+            const next = { ...prev, [game.id]: result };
+            saveCachedAnalysis(targetDate, next);
+            return next;
+          });
           // Auto-save picks to record tracker
           if (result && !result.error) {
             const picksToSave = [];
@@ -188,6 +219,12 @@ export default function Scoreboard() {
       }
       setGames(fetchedGames);
       setError('');
+
+      // Auto-grade if any games just went final
+      const hasFinals = fetchedGames.some(g => g.status === 'final');
+      if (hasFinals) {
+        fetch('/api/grade', { method: 'POST' }).catch(() => {});
+      }
     } else {
       setError(scoresRes.value?.error || 'Failed to fetch scores');
     }
@@ -200,14 +237,23 @@ export default function Scoreboard() {
   }, [analysisDate, runAnalysisForGames]);
 
   useEffect(() => {
+    if (!date) return;
     setLoading(true);
-    setAnalysisMap({});
-    setAnalysisPending(new Set());
-    setAnalysisDate(null);
+    // Load cached analysis first — avoids re-running on every page load
+    const cached = loadCachedAnalysis(date);
+    if (cached) {
+      setAnalysisMap(cached);
+      setAnalysisDate(date);
+    } else {
+      setAnalysisMap({});
+      setAnalysisPending(new Set());
+      setAnalysisDate(null);
+    }
     fetchAll(date);
   }, [date]); // eslint-disable-line
 
   useEffect(() => {
+    if (!date) return;
     timerRef.current = setInterval(() => { fetchAll(date); setCountdown(REFRESH_INTERVAL / 1000); }, REFRESH_INTERVAL);
     countdownRef.current = setInterval(() => setCountdown(p => p <= 1 ? REFRESH_INTERVAL / 1000 : p - 1), 1000);
     return () => { clearInterval(timerRef.current); clearInterval(countdownRef.current); };
@@ -219,7 +265,9 @@ export default function Scoreboard() {
   };
   const formatDate = ds => new Date(ds + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
   const formatTime = iso => iso ? new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) : '';
-  const isToday = date === new Date().toISOString().split('T')[0];
+  const now = new Date();
+  const todayLocal = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  const isToday = date === todayLocal;
   const totalPending = analysisPending.size;
   const totalAnalyzed = Object.keys(analysisMap).length;
 
@@ -262,8 +310,29 @@ export default function Scoreboard() {
                 <div className={styles.analysisDone}>✓ {totalAnalyzed} games analyzed</div>
               )}
               {hasLive && <span className={styles.livePulse}></span>}
-              <span className={styles.refreshText}>{hasLive ? 'LIVE · ' : ''}↻ {countdown}s</span>
-              <button className={styles.refreshBtn} onClick={() => { setLoading(true); setAnalysisMap({}); setAnalysisPending(new Set()); setAnalysisDate(null); fetchAll(date); }}>Refresh</button>
+              <span className={styles.refreshText}>{hasLive ? 'LIVE · ' : ''}{countdown}s</span>
+              <button
+                className={styles.reAnalyzeBtn}
+                title="Re-run AI analysis"
+                onClick={() => {
+                  clearCachedAnalysis(date);
+                  setAnalysisMap({});
+                  setAnalysisPending(new Set());
+                  setAnalysisDate(null);
+                  fetchAll(date);
+                }}
+              >↺ Re-analyze</button>
+              <button
+                className={styles.iconBtn}
+                title="Refresh scores & odds"
+                onClick={() => fetchAll(date)}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="23 4 23 10 17 10"></polyline>
+                  <polyline points="1 20 1 14 7 14"></polyline>
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                </svg>
+              </button>
             </div>
           </div>
         </header>
