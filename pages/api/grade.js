@@ -1,19 +1,32 @@
-import { Redis } from '@upstash/redis';
+async function redisGet(key) {
+  const url = process.env.mlb_KV_REST_API_URL;
+  const token = process.env.mlb_KV_REST_API_TOKEN;
+  const res = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  const data = await res.json();
+  return data.result ? JSON.parse(data.result) : null;
+}
 
-const redis = new Redis({
-  url: process.env.mlb_KV_REST_API_URL,
-  token: process.env.mlb_KV_REST_API_TOKEN,
-});
+async function redisSet(key, value) {
+  const url = process.env.mlb_KV_REST_API_URL;
+  const token = process.env.mlb_KV_REST_API_TOKEN;
+  await fetch(`${url}/set/${encodeURIComponent(key)}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify([JSON.stringify(value)])
+  });
+}
 
 const PICKS_KEY = 'mlb:picks';
 
 async function loadPicks() {
-  try { return (await redis.get(PICKS_KEY)) || []; }
+  try { return (await redisGet(PICKS_KEY)) || []; }
   catch (e) { console.error('Redis load:', e.message); return []; }
 }
 
 async function savePicks(picks) {
-  await redis.set(PICKS_KEY, picks);
+  await redisSet(PICKS_KEY, picks);
 }
 
 async function getFinalGames(date) {
