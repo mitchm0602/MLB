@@ -13,7 +13,7 @@ export default async function handler(req, res) {
     results.redisConnection = val?.ok === true ? 'success' : 'unexpected: ' + JSON.stringify(val);
 
     // Check v2 picks
-    const picks = await redisGet('mlb:picks:v2');
+    const picks = await redisGet('mlb:picks:v3');
     results.picksV2Count = Array.isArray(picks) ? picks.length : `not array: ${typeof picks}`;
     results.recentPicks = Array.isArray(picks) ? picks.slice(-3) : null;
 
