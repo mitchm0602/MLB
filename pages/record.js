@@ -27,7 +27,12 @@ export default function Record() {
       .catch(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    // Auto-grade on page load then load record
+    fetch('/api/grade', { method: 'POST' })
+      .then(() => load())
+      .catch(() => load());
+  }, []);
 
   const runGrading = async () => {
     setGrading(true);
