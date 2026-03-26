@@ -1,37 +1,19 @@
-async function redisGet(key) {
-  const url = process.env.mlb_KV_REST_API_URL;
-  const token = process.env.mlb_KV_REST_API_TOKEN;
-  const res = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  const data = await res.json();
-  return data.result ? JSON.parse(data.result) : null;
-}
+import { redisGet, redisSet } from './_redis';
 
-async function redisSet(key, value) {
-  const url = process.env.mlb_KV_REST_API_URL;
-  const token = process.env.mlb_KV_REST_API_TOKEN;
-  await fetch(`${url}/set/${encodeURIComponent(key)}`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify([JSON.stringify(value)])
-  });
-}
-
-const PICKS_KEY = 'mlb:picks';
+const KEY = 'mlb:picks:v2'; // v2 = clean key, abandons corrupted v1 data
 
 async function loadPicks() {
   try {
-    const data = await redisGet(PICKS_KEY);
-    return data || [];
+    const data = await redisGet(KEY);
+    return Array.isArray(data) ? data : [];
   } catch (e) {
-    console.error('Redis load error:', e.message);
+    console.error('loadPicks error:', e.message);
     return [];
   }
 }
 
 async function savePicks(picks) {
-  await redisSet(PICKS_KEY, picks);
+  await redisSet(KEY, picks);
 }
 
 export default async function handler(req, res) {
@@ -39,13 +21,12 @@ export default async function handler(req, res) {
 
   if (req.method === 'GET') {
     const picks = await loadPicks();
-    const { date, status } = req.query;
+    const { date } = req.query;
 
     let filtered = picks;
     if (date) filtered = filtered.filter(p => p.gameDate === date);
-    if (status) filtered = filtered.filter(p => p.result === status);
 
-    const graded = picks.filter(p => p.result && !['pending','pass'].includes(p.result));
+    const graded = picks.filter(p => p.result && !['pending', 'pass'].includes(p.result));
     const wins = graded.filter(p => p.result === 'win').length;
     const losses = graded.filter(p => p.result === 'loss').length;
     const pushes = graded.filter(p => p.result === 'push').length;
@@ -74,13 +55,16 @@ export default async function handler(req, res) {
     const existing = await loadPicks();
 
     for (const pick of newPicks) {
-      const idx = existing.findIndex(p => p.gameId === pick.gameId && p.pickType === pick.pickType);
+      const idx = existing.findIndex(p =>
+        String(p.gameId) === String(pick.gameId) && p.pickType === pick.pickType
+      );
       if (idx >= 0) {
+        // Only update if still pending
         if (existing[idx].result === 'pending') {
           existing[idx] = { ...existing[idx], ...pick };
         }
       } else {
-        existing.push({ ...pick, result: pick.result || 'pending', savedAt: new Date().toISOString() });
+        existing.push({ ...pick, result: 'pending', savedAt: new Date().toISOString() });
       }
     }
 
@@ -89,7 +73,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'DELETE') {
-    await savePicks([]);
+    await redisSet(KEY, []);
     return res.status(200).json({ cleared: true });
   }
 
