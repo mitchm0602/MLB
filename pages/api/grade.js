@@ -1,32 +1,12 @@
-async function redisGet(key) {
-  const url = process.env.mlb_KV_REST_API_URL;
-  const token = process.env.mlb_KV_REST_API_TOKEN;
-  const res = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  const data = await res.json();
-  return data.result ? JSON.parse(data.result) : null;
-}
+import { redisGet, redisSet } from './_redis';
 
-async function redisSet(key, value) {
-  const url = process.env.mlb_KV_REST_API_URL;
-  const token = process.env.mlb_KV_REST_API_TOKEN;
-  await fetch(`${url}/set/${encodeURIComponent(key)}`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify([JSON.stringify(value)])
-  });
-}
-
-const PICKS_KEY = 'mlb:picks';
+const KEY = 'mlb:picks:v2';
 
 async function loadPicks() {
-  try { return (await redisGet(PICKS_KEY)) || []; }
-  catch (e) { console.error('Redis load:', e.message); return []; }
-}
-
-async function savePicks(picks) {
-  await redisSet(PICKS_KEY, picks);
+  try {
+    const data = await redisGet(KEY);
+    return Array.isArray(data) ? data : [];
+  } catch (e) { return []; }
 }
 
 async function getFinalGames(date) {
@@ -44,12 +24,12 @@ async function getFinalGames(date) {
         const away = game.teams?.away?.score;
         const home = game.teams?.home?.score;
         if (away == null || home == null) continue;
-        games.push({ id: game.gamePk, awayScore: away, homeScore: home });
+        games.push({ id: String(game.gamePk), awayScore: away, homeScore: home });
       }
     }
     return games;
   } catch (e) {
-    console.error('MLB fetch error:', e.message);
+    console.error('getFinalGames error:', e.message);
     return [];
   }
 }
@@ -95,7 +75,7 @@ export default async function handler(req, res) {
     const pending = picks.filter(p => p.result === 'pending');
 
     if (!pending.length) {
-      return res.status(200).json({ graded: 0, message: 'No pending picks' });
+      return res.status(200).json({ graded: 0, message: 'No pending picks', total: picks.length });
     }
 
     const dates = [...new Set(pending.map(p => p.gameDate))];
@@ -104,33 +84,39 @@ export default async function handler(req, res) {
     for (const date of dates) {
       const games = await getFinalGames(date);
       for (const game of games) {
-        const gamePicks = pending.filter(p => String(p.gameId) === String(game.id));
+        const gamePicks = pending.filter(p => String(p.gameId) === game.id);
         for (const pick of gamePicks) {
-          const idx = picks.findIndex(p => String(p.gameId) === String(game.id) && p.pickType === pick.pickType);
+          const idx = picks.findIndex(p =>
+            String(p.gameId) === game.id && p.pickType === pick.pickType
+          );
           if (idx === -1) continue;
 
           let result = null;
           if (pick.pickType === 'spread' && pick.pickSide && pick.pickSide !== 'pass') {
             result = gradeSpread(pick, game.awayScore, game.homeScore);
-          } else if (pick.pickType === 'total' && pick.pick && pick.pick !== 'PASS') {
+          } else if (pick.pickType === 'total' && pick.pick && pick.pick !== 'PASS' && pick.pick !== 'pass') {
             result = gradeTotal(pick, game.awayScore, game.homeScore);
           } else {
             result = 'pass';
           }
 
           if (result) {
-            picks[idx].result = result;
-            picks[idx].actualAway = game.awayScore;
-            picks[idx].actualHome = game.homeScore;
-            picks[idx].gradedAt = new Date().toISOString();
+            picks[idx] = {
+              ...picks[idx],
+              result,
+              actualAway: game.awayScore,
+              actualHome: game.homeScore,
+              gradedAt: new Date().toISOString()
+            };
             totalGraded++;
           }
         }
       }
     }
 
-    if (totalGraded > 0) await savePicks(picks);
-    res.status(200).json({ graded: totalGraded, total: picks.length });
+    if (totalGraded > 0) await redisSet(KEY, picks);
+
+    res.status(200).json({ graded: totalGraded, total: picks.length, pending: pending.length });
   } catch (e) {
     console.error('Grade error:', e.message);
     res.status(500).json({ error: e.message });
