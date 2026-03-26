@@ -1,6 +1,6 @@
 import { redisGet, redisSet } from './_redis';
 
-const KEY = 'mlb:picks:v2';
+const KEY = 'mlb:picks:v3';
 
 async function loadPicks() {
   try {
