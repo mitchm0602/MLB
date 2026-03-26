@@ -4,9 +4,9 @@ export default async function handler(req, res) {
   const results = {};
 
   // 1. Check env vars
-  results.hasRedisUrl = !!process.env.UPSTASH_REDIS_REST_URL;
-  results.hasRedisToken = !!process.env.UPSTASH_REDIS_REST_TOKEN;
-  results.redisUrlPrefix = process.env.UPSTASH_REDIS_REST_URL?.slice(0, 30) || 'NOT SET';
+  results.hasRedisUrl = !!process.env.mlb_KV_REST_API_URL;
+  results.hasRedisToken = !!process.env.mlb_KV_REST_API_TOKEN;
+  results.redisUrlPrefix = process.env.mlb_KV_REST_API_URL?.slice(0, 30) || 'NOT SET';
 
   if (!results.hasRedisUrl || !results.hasRedisToken) {
     return res.status(200).json({ ...results, error: 'Missing Upstash env vars' });
