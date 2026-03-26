@@ -1,41 +1,36 @@
-// Shared Redis helpers using Upstash REST API directly
-// Handles serialization correctly - stores as plain JSON string, reads back as parsed object
+// Upstash Redis REST API
+// SET: POST to /set/key with raw string body (Content-Type: text/plain)
+// GET: GET to /get/key -> { result: "stored_string" }
 
-const getUrl = () => process.env.mlb_KV_REST_API_URL;
-const getToken = () => process.env.mlb_KV_REST_API_TOKEN;
+const url = () => process.env.mlb_KV_REST_API_URL;
+const token = () => process.env.mlb_KV_REST_API_TOKEN;
+const auth = () => ({ Authorization: `Bearer ${token()}` });
 
 export async function redisGet(key) {
-  const res = await fetch(`${getUrl()}/get/${encodeURIComponent(key)}`, {
-    headers: { Authorization: `Bearer ${getToken()}` }
+  const res = await fetch(`${url()}/get/${encodeURIComponent(key)}`, {
+    headers: auth()
   });
-  const data = await res.json();
-  if (!data.result) return null;
-  // Upstash returns the value as a string - parse it once
-  try {
-    return JSON.parse(data.result);
-  } catch {
-    return data.result;
-  }
+  const json = await res.json();
+  if (json.result === null || json.result === undefined) return null;
+  // result is a plain string — parse it once as JSON
+  try { return JSON.parse(json.result); }
+  catch { return json.result; }
 }
 
 export async function redisSet(key, value) {
-  // Serialize once to a plain JSON string
-  const serialized = JSON.stringify(value);
-  const res = await fetch(`${getUrl()}/set/${encodeURIComponent(key)}`, {
+  // Serialize value to a JSON string, send as plain text body
+  const body = JSON.stringify(value);
+  const res = await fetch(`${url()}/set/${encodeURIComponent(key)}`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${getToken()}`,
-      'Content-Type': 'application/json'
-    },
-    // Upstash REST API: body is [value] array for SET command
-    body: JSON.stringify([serialized])
+    headers: { ...auth(), 'Content-Type': 'text/plain' },
+    body: body  // raw JSON string, NOT wrapped in array
   });
   return res.json();
 }
 
 export async function redisDel(key) {
-  await fetch(`${getUrl()}/del/${encodeURIComponent(key)}`, {
+  await fetch(`${url()}/del/${encodeURIComponent(key)}`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${getToken()}` }
+    headers: auth()
   });
 }
