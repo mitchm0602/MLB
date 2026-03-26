@@ -18,11 +18,16 @@ export default function BestBets() {
   const [picks, setPicks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(null);
+  useEffect(() => {
+    const now = new Date();
+    setDate(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`);
+  }, []);
   const [filter, setFilter] = useState('all'); // all | spread | total
   const [minConf, setMinConf] = useState(6);
 
   useEffect(() => {
+    if (!date) return;
     setLoading(true);
     fetch(`/api/picks?date=${date}`)
       .then(r => r.json())
@@ -39,7 +44,9 @@ export default function BestBets() {
     setDate(d.toISOString().split('T')[0]);
   };
 
-  const isToday = date === new Date().toISOString().split('T')[0];
+  const now = new Date();
+  const todayLocal = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  const isToday = date === todayLocal;
 
   // Filter + sort by confidence desc
   const filtered = picks
