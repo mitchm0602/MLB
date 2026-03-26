@@ -1,6 +1,6 @@
 import { redisGet, redisSet } from './_redis';
 
-const KEY = 'mlb:picks:v2'; // v2 = clean key, abandons corrupted v1 data
+const KEY = 'mlb:picks:v3'; // v2 = clean key, abandons corrupted v1 data
 
 async function loadPicks() {
   try {
