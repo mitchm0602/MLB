@@ -95,6 +95,37 @@
 }
 .refreshBtn:hover { color: var(--text); }
 
+/* New icon-only refresh button */
+.iconBtn {
+  background: transparent;
+  border: 1px solid var(--border2);
+  color: var(--muted);
+  width: 28px; height: 28px;
+  border-radius: 3px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: color 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+.iconBtn:hover { color: var(--text); border-color: var(--text); }
+
+/* Re-analyze button */
+.reAnalyzeBtn {
+  background: transparent;
+  border: 1px solid var(--border2);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  padding: 0 10px;
+  height: 28px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+.reAnalyzeBtn:hover { color: var(--accent); border-color: var(--accent); }
+
 /* Main */
 .main {
   max-width: 1100px;
