@@ -1,12 +1,18 @@
 {
   "functions": {
     "pages/api/analyze.js": {
-      "maxDuration": 60
+      "maxDuration": 120
     },
     "pages/api/scores.js": {
       "maxDuration": 15
     },
     "pages/api/odds.js": {
+      "maxDuration": 15
+    },
+    "pages/api/grade.js": {
+      "maxDuration": 30
+    },
+    "pages/api/picks.js": {
       "maxDuration": 15
     }
   }
