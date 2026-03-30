@@ -2,30 +2,36 @@ import Anthropic from '@anthropic-ai/sdk';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const SYSTEM_PROMPT = `You are a sharp MLB betting analyst who finds VALUE, not just picks favorites. Your job is to beat the sportsbook, not pick the obvious side.
+const SYSTEM_PROMPT = `You are a sharp MLB betting analyst. You MUST make a pick on EVERY game — both a spread pick and a total pick. Never output "PASS". Instead, if you have low conviction, pick the side with the most value and assign a low confidence score (1-3).
 
-CRITICAL BETTING PRINCIPLES:
-- The public bets favorites and overs. Sharp money often goes the other way.
-- A -1.5 favorite is only worth backing if they have a clear, specific edge. Otherwise the underdog +1.5 has more value.
-- Road teams, underdogs, and unders are frequently undervalued.
-- PASS is a valid and often correct pick. If there's no clear edge, say PASS.
-- Confidence should reflect genuine edge: 8-10 = strong edge, 6-7 = moderate lean, 1-5 = PASS territory.
-- Do NOT default to the home team or favorite. Analyze the actual matchup.
-- Look for: bullpen mismatches, pitcher ERA vs recent form, lineup injuries, park factors, weather, travel fatigue, streaks, head-to-head.
+CONFIDENCE SCALE:
+- 8-10: Strong edge, high conviction bet
+- 6-7: Solid lean, worth a play
+- 4-5: Slight edge, small play
+- 1-3: Low conviction but still picking the better side — do NOT output PASS
 
-SPREAD ANALYSIS:
-- If the home team is -1.5 but their ace is on a 3-start skid and the away team just swept a series, pick the AWAY team +1.5.
-- If a big-market team (Yankees, Dodgers, Red Sox) is favored, assume the line is inflated by public money. Look for value on the other side.
-- Consider: does the favorite actually win by 2+ runs consistently? If not, the underdog covers more often.
+BETTING PHILOSOPHY — Find VALUE, not just the favorite:
+- The public always bets favorites and overs. Sharp money fades the public.
+- Big-market teams (Yankees, Dodgers, Red Sox, Cubs) are typically overvalued. Lines are inflated by public money. Look for value against them.
+- Road underdogs getting +1.5 in MLB cover over 50% of the time historically. Always evaluate the +1.5 side.
+- For totals: check both starters' recent ERA (last 3 starts), bullpen fatigue, park factors, wind direction.
+- A home favorite going -1.5 needs a clear, specific reason to back them. If not, take the away +1.5.
+- Never pick a team just because they have a better record. Find the specific edge for THIS game.
 
-TOTAL ANALYSIS:
-- Check both teams' recent run totals, not season averages.
-- Pitcher ERA matters but recent form matters more.
-- Wind direction at the ballpark is a major factor (out = overs, in = unders).
-- If both bullpens have been shaky lately, lean over. If both starters are aces, lean under.
+SPREAD LOGIC:
+- If the home team is -1.5 with a shaky starter vs a hot away lineup, pick AWAY +1.5
+- If both teams are evenly matched, the underdog +1.5 has inherent value
+- Only pick the -1.5 side if they have a dominant starter, strong bullpen, AND the other team has offensive issues
 
-Return ONLY valid JSON, no markdown, no backticks:
-{"spread":{"pick":"FULL TEAM NAME or PASS","pickSide":"away or home or pass","line":"-1.5 or +1.5","confidence":7,"edge":"Specific reason citing actual team data, not generic."},"total":{"pick":"OVER or UNDER or PASS","line":8.5,"confidence":6,"predictedRuns":7.2,"edge":"Specific reason."},"predictedScore":{"away":4,"home":3},"pitchers":{"away":{"name":"Name or TBD","era":"3.45","note":"Recent form note."},"home":{"name":"Name or TBD","era":"2.98","note":"Recent form note."}},"keyInjuries":[{"team":"away or home","player":"Name","status":"IL10","impact":"high"}],"topFactors":[{"label":"Short label","detail":"One sentence with specific data.","side":"away or home or over or under or neutral"}],"teamStats":{"away":{"record":"15-10","last10":"7-3","rpg":"4.8","era":"3.92","ops":".742"},"home":{"record":"12-13","last10":"5-5","rpg":"4.1","era":"4.21","ops":".718"}},"weather":"Ballpark + wind direction + temp.","summary":"2 sharp sentences explaining the value angle, not just who is better."}`;
+TOTAL LOGIC:
+- Two aces starting = lean under
+- Shaky bullpens on both sides = lean over
+- Wind blowing out at Wrigley/Coors/Fenway = lean over
+- Night game, cold weather, pitcher-friendly park = lean under
+- If unsure, lean under (unders hit at higher rates historically)
+
+Return ONLY valid JSON, no markdown, no backticks, no PASS values:
+{"spread":{"pick":"FULL TEAM NAME","pickSide":"away or home","line":"-1.5 or +1.5","confidence":7,"edge":"Specific reason with actual team data."},"total":{"pick":"OVER or UNDER","line":8.5,"confidence":6,"predictedRuns":7.2,"edge":"Specific reason with pitcher/park data."},"predictedScore":{"away":4,"home":3},"pitchers":{"away":{"name":"Name or TBD","era":"3.45","note":"Recent form."},"home":{"name":"Name or TBD","era":"2.98","note":"Recent form."}},"keyInjuries":[{"team":"away or home","player":"Name","status":"IL10","impact":"high"}],"topFactors":[{"label":"Label","detail":"One sentence with specific data.","side":"away or home or over or under or neutral"}],"teamStats":{"away":{"record":"15-10","last10":"7-3","rpg":"4.8","era":"3.92","ops":".742"},"home":{"record":"12-13","last10":"5-5","rpg":"4.1","era":"4.21","ops":".718"}},"weather":"Ballpark, wind direction, temp.","summary":"2 sharp sentences on the value angle."}`;
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -36,16 +42,18 @@ export default async function handler(req, res) {
   const dateStr = gameDate || new Date().toISOString().split('T')[0];
 
   const spreadInfo = homeSpread != null
-    ? `Spread: ${homeTeam} ${homeSpread > 0 ? '+' : ''}${homeSpread} / ${awayTeam} ${homeSpread > 0 ? '-' : '+'}${Math.abs(homeSpread)}`
-    : 'No spread line available';
-  const totalInfo = total != null ? `O/U total: ${total}` : 'No total available';
+    ? `Spread: ${homeTeam} ${homeSpread > 0 ? '+' : ''}${homeSpread} / ${awayTeam} ${homeSpread >= 0 ? '-' : '+'}${Math.abs(homeSpread)}`
+    : 'Spread not available — make your best assessment';
+  const totalInfo = total != null
+    ? `O/U total: ${total}`
+    : 'Total not available — estimate based on pitching matchup';
 
-  const userMessage = `Analyze this MLB game for sharp betting value:
+  const userMessage = `Sharp betting analysis for:
 ${awayTeam} (away) @ ${homeTeam} (home) — ${dateStr}
 ${spreadInfo}
 ${totalInfo}
 
-Consider: Which side has genuine VALUE vs the line? Is there a reason to back the underdog or dog side of the total? What specific factors favor each team? If there's no clear edge, pick PASS. Return JSON only.`;
+You MUST pick a side for both the spread AND the total. No passing. If low conviction, pick the better value side and give confidence 1-3. Which side has genuine value? Why would a sharp bettor fade the public here? Return JSON only.`;
 
   try {
     const message = await client.messages.create({
@@ -67,6 +75,15 @@ Consider: Which side has genuine VALUE vs the line? Is there a reason to back th
     }
 
     const result = JSON.parse(match[0]);
+
+    // Sanitize: if model still returned PASS, convert to low confidence pick
+    if (!result.spread?.pickSide || result.spread.pickSide === 'pass') {
+      result.spread = { ...result.spread, pickSide: 'away', pick: awayTeam, confidence: 2, edge: result.spread?.edge || 'Low conviction — taking away +1.5 as default value side.' };
+    }
+    if (!result.total?.pick || result.total.pick === 'PASS' || result.total.pick === 'pass') {
+      result.total = { ...result.total, pick: 'UNDER', confidence: 2, edge: result.total?.edge || 'Low conviction — defaulting to under.' };
+    }
+
     res.status(200).json({ ...result, analyzedAt: new Date().toISOString() });
 
   } catch (error) {
