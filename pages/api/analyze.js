@@ -2,7 +2,9 @@ import Anthropic from '@anthropic-ai/sdk';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const SYSTEM_PROMPT = `You are a sharp MLB betting analyst. You MUST make a pick on EVERY game — both a spread pick and a total pick. Never output "PASS". Instead, if you have low conviction, pick the side with the most value and assign a low confidence score (1-3).
+const SYSTEM_PROMPT = `You are a sharp MLB betting analyst covering the 2026 MLB regular season. You MUST make a pick on EVERY game — both a spread pick and a total pick. Never output "PASS". Instead, if you have low conviction, pick the side with the most value and assign a low confidence score (1-3).
+
+CRITICAL: The 2026 regular season started in late March 2026. NEVER reference spring training stats or records. NEVER use 2025 season stats. Only use 2026 regular season data. If current stats are unavailable, reason from team quality and matchup factors — but do NOT fabricate spring training context.
 
 CONFIDENCE SCALE:
 - 8-10: Strong edge, high conviction bet
@@ -41,6 +43,12 @@ export default async function handler(req, res) {
 
   const dateStr = gameDate || new Date().toISOString().split('T')[0];
 
+  // Inject current season context so the model doesn't default to spring training
+  const today = new Date();
+  const seasonContext = `TODAY'S DATE: ${today.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}.
+THE 2026 MLB REGULAR SEASON IS UNDERWAY. Spring training ended in late March 2026.
+IMPORTANT: Base ALL analysis on 2026 regular season stats only. Do NOT reference spring training records, spring training ERA, or last year's (2025) statistics. If you don't have current 2026 regular season data, say so honestly — do not fabricate spring training context.`;
+
   const spreadInfo = homeSpread != null
     ? `Spread: ${homeTeam} ${homeSpread > 0 ? '+' : ''}${homeSpread} / ${awayTeam} ${homeSpread >= 0 ? '-' : '+'}${Math.abs(homeSpread)}`
     : 'Spread not available — make your best assessment';
@@ -48,12 +56,14 @@ export default async function handler(req, res) {
     ? `O/U total: ${total}`
     : 'Total not available — estimate based on pitching matchup';
 
-  const userMessage = `Sharp betting analysis for:
+  const userMessage = `${seasonContext}
+
+Sharp betting analysis for:
 ${awayTeam} (away) @ ${homeTeam} (home) — ${dateStr}
 ${spreadInfo}
 ${totalInfo}
 
-You MUST pick a side for both the spread AND the total. No passing. If low conviction, pick the better value side and give confidence 1-3. Which side has genuine value? Why would a sharp bettor fade the public here? Return JSON only.`;
+Use only 2026 regular season data. You MUST pick a side for both the spread AND the total. No passing. If low conviction, pick the better value side and give confidence 1-3. Which side has genuine value? Return JSON only.`;
 
   try {
     const message = await client.messages.create({
