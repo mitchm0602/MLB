@@ -1,19 +1,16 @@
 {
   "functions": {
-    "pages/api/analyze.js": {
-      "maxDuration": 120
-    },
-    "pages/api/scores.js": {
-      "maxDuration": 15
-    },
-    "pages/api/odds.js": {
-      "maxDuration": 15
-    },
-    "pages/api/grade.js": {
-      "maxDuration": 30
-    },
-    "pages/api/picks.js": {
-      "maxDuration": 15
+    "pages/api/analyze.js": { "maxDuration": 120 },
+    "pages/api/cron-analyze.js": { "maxDuration": 300 },
+    "pages/api/scores.js": { "maxDuration": 15 },
+    "pages/api/odds.js": { "maxDuration": 15 },
+    "pages/api/grade.js": { "maxDuration": 30 },
+    "pages/api/picks.js": { "maxDuration": 15 }
+  },
+  "crons": [
+    {
+      "path": "/api/cron-analyze",
+      "schedule": "0 19 * * *"
     }
-  }
+  ]
 }
