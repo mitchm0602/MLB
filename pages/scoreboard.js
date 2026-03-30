@@ -130,10 +130,11 @@ export default function Scoreboard() {
             saveCachedAnalysis(targetDate, next);
             return next;
           });
-          // Auto-save picks to record tracker
+          // Auto-save picks to record tracker — always save both picks
           if (result && !result.error) {
             const picksToSave = [];
-            if (result.spread?.pickSide && result.spread.pickSide !== 'pass') {
+            // Always save spread pick (no PASS allowed from API)
+            if (result.spread?.pickSide && result.spread?.pick) {
               picksToSave.push({
                 gameId: game.id,
                 gameDate: targetDate,
@@ -150,7 +151,8 @@ export default function Scoreboard() {
                 result: 'pending',
               });
             }
-            if (result.total?.pick && result.total.pick !== 'PASS') {
+            // Always save total pick (no PASS allowed from API)
+            if (result.total?.pick && result.total.pick !== 'PASS' && result.total.pick !== 'pass') {
               picksToSave.push({
                 gameId: game.id,
                 gameDate: targetDate,
