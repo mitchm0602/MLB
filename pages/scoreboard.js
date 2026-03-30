@@ -19,6 +19,15 @@ function loadCachedAnalysis(date) {
   } catch { return null; }
 }
 
+async function loadCronAnalysis(date) {
+  try {
+    const res = await fetch(`/api/cron-cache?date=${date}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.results || null;
+  } catch { return null; }
+}
+
 function saveCachedAnalysis(date, analysisMap) {
   try { localStorage.setItem(CACHE_KEY(date), JSON.stringify({ data: analysisMap, savedAt: Date.now() })); } catch {}
 }
@@ -86,6 +95,50 @@ export default function Scoreboard() {
     const now = new Date();
     const localDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
     setDate(localDate);
+  }, []);
+
+  const reAnalyzeGame = useCallback(async (game, oddsEntry, targetDate) => {
+    setAnalysisPending(prev => new Set([...prev, game.id]));
+    // Clear this game from cache
+    setAnalysisMap(prev => {
+      const next = { ...prev };
+      delete next[game.id];
+      return next;
+    });
+    try {
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          homeTeam: game.home.name,
+          awayTeam: game.away.name,
+          gameDate: targetDate,
+          homeSpread: oddsEntry?.spread?.homePoint ?? null,
+          total: oddsEntry?.total?.point ?? null,
+        })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const result = await res.json();
+      setAnalysisMap(prev => {
+        const next = { ...prev, [game.id]: result };
+        saveCachedAnalysis(targetDate, next);
+        return next;
+      });
+      // Save updated picks
+      const picksToSave = [];
+      if (result.spread?.pickSide && result.spread?.pick) {
+        picksToSave.push({ gameId: game.id, gameDate: targetDate, awayTeam: game.away.name, homeTeam: game.home.name, awayAbbrev: game.away.abbrev, homeAbbrev: game.home.abbrev, pickType: 'spread', pick: result.spread.pick, pickSide: result.spread.pickSide, line: result.spread.line, confidence: result.spread.confidence, edge: result.spread.edge, result: 'pending' });
+      }
+      if (result.total?.pick && !['PASS','pass'].includes(result.total.pick)) {
+        picksToSave.push({ gameId: game.id, gameDate: targetDate, awayTeam: game.away.name, homeTeam: game.home.name, awayAbbrev: game.away.abbrev, homeAbbrev: game.home.abbrev, pickType: 'total', pick: result.total.pick, line: result.total.line, confidence: result.total.confidence, edge: result.total.edge, result: 'pending' });
+      }
+      if (picksToSave.length) {
+        fetch('/api/picks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ picks: picksToSave }) }).catch(() => {});
+      }
+    } catch (e) {
+      setAnalysisMap(prev => ({ ...prev, [game.id]: { error: e.message } }));
+    }
+    setAnalysisPending(prev => { const next = new Set(prev); next.delete(game.id); return next; });
   }, []);
 
   const runAnalysisForGames = useCallback(async (fetchedGames, oddsData, targetDate) => {
@@ -232,26 +285,33 @@ export default function Scoreboard() {
     }
     setLoading(false);
 
-    // Kick off analysis for all games (only if we haven't already analyzed this date)
-    if (fetchedGames.length && analysisDate !== targetDate) {
-      runAnalysisForGames(fetchedGames, builtOddsMap, targetDate);
-    }
+    // Analysis is triggered by cron at 1pm CT or manually per-game
+    // Do NOT auto-run on page load
   }, [analysisDate, runAnalysisForGames]);
 
   useEffect(() => {
     if (!date) return;
     setLoading(true);
-    // Load cached analysis first — avoids re-running on every page load
+    // Check localStorage cache first
     const cached = loadCachedAnalysis(date);
     if (cached) {
       setAnalysisMap(cached);
       setAnalysisDate(date);
+      fetchAll(date);
     } else {
-      setAnalysisMap({});
-      setAnalysisPending(new Set());
-      setAnalysisDate(null);
+      // Try Redis cron cache (populated by 1pm cron job)
+      loadCronAnalysis(date).then(cronCache => {
+        if (cronCache) {
+          setAnalysisMap(cronCache);
+          setAnalysisDate(date);
+          saveCachedAnalysis(date, cronCache); // save to localStorage too
+        } else {
+          setAnalysisMap({});
+          setAnalysisDate(null);
+        }
+        fetchAll(date);
+      });
     }
-    fetchAll(date);
   }, [date]); // eslint-disable-line
 
   useEffect(() => {
@@ -314,17 +374,6 @@ export default function Scoreboard() {
               {hasLive && <span className={styles.livePulse}></span>}
               <span className={styles.refreshText}>{hasLive ? 'LIVE · ' : ''}{countdown}s</span>
               <button
-                className={styles.reAnalyzeBtn}
-                title="Re-run AI analysis"
-                onClick={() => {
-                  clearCachedAnalysis(date);
-                  setAnalysisMap({});
-                  setAnalysisPending(new Set());
-                  setAnalysisDate(null);
-                  fetchAll(date);
-                }}
-              >↺ Re-analyze</button>
-              <button
                 className={styles.iconBtn}
                 title="Refresh scores & odds"
                 onClick={() => fetchAll(date)}
@@ -362,25 +411,25 @@ export default function Scoreboard() {
           {liveGames.length > 0 && (
             <section>
               <div className={styles.sectionLabel}><span className={styles.liveDot}></span> LIVE — {liveGames.length} GAME{liveGames.length !== 1 ? 'S' : ''}</div>
-              <div className={styles.gameGrid}>{liveGames.map(g => <GameCard key={g.id} game={g} odds={oddsMap[g.id]} analysis={analysisMap[g.id]} pending={analysisPending.has(g.id)} formatTime={formatTime} />)}</div>
+              <div className={styles.gameGrid}>{liveGames.map(g => <GameCard key={g.id} game={g} odds={oddsMap[g.id]} analysis={analysisMap[g.id]} pending={analysisPending.has(g.id)} formatTime={formatTime} onReanalyze={() => reAnalyzeGame(g, oddsMap[g.id], date)} />)}</div>
             </section>
           )}
           {scheduledGames.length > 0 && (
             <section>
               <div className={styles.sectionLabel}>SCHEDULED — {scheduledGames.length} GAME{scheduledGames.length !== 1 ? 'S' : ''}</div>
-              <div className={styles.gameGrid}>{scheduledGames.map(g => <GameCard key={g.id} game={g} odds={oddsMap[g.id]} analysis={analysisMap[g.id]} pending={analysisPending.has(g.id)} formatTime={formatTime} />)}</div>
+              <div className={styles.gameGrid}>{scheduledGames.map(g => <GameCard key={g.id} game={g} odds={oddsMap[g.id]} analysis={analysisMap[g.id]} pending={analysisPending.has(g.id)} formatTime={formatTime} onReanalyze={() => reAnalyzeGame(g, oddsMap[g.id], date)} />)}</div>
             </section>
           )}
           {finalGames.length > 0 && (
             <section>
               <div className={styles.sectionLabel}>FINAL — {finalGames.length} GAME{finalGames.length !== 1 ? 'S' : ''}</div>
-              <div className={styles.gameGrid}>{finalGames.map(g => <GameCard key={g.id} game={g} odds={oddsMap[g.id]} analysis={analysisMap[g.id]} pending={false} formatTime={formatTime} />)}</div>
+              <div className={styles.gameGrid}>{finalGames.map(g => <GameCard key={g.id} game={g} odds={oddsMap[g.id]} analysis={analysisMap[g.id]} pending={false} formatTime={formatTime} onReanalyze={() => reAnalyzeGame(g, oddsMap[g.id], date)} />)}</div>
             </section>
           )}
           {otherGames.length > 0 && (
             <section>
               <div className={styles.sectionLabel}>OTHER</div>
-              <div className={styles.gameGrid}>{otherGames.map(g => <GameCard key={g.id} game={g} odds={oddsMap[g.id]} analysis={analysisMap[g.id]} pending={analysisPending.has(g.id)} formatTime={formatTime} />)}</div>
+              <div className={styles.gameGrid}>{otherGames.map(g => <GameCard key={g.id} game={g} odds={oddsMap[g.id]} analysis={analysisMap[g.id]} pending={analysisPending.has(g.id)} formatTime={formatTime} onReanalyze={() => reAnalyzeGame(g, oddsMap[g.id], date)} />)}</div>
             </section>
           )}
         </main>
@@ -389,7 +438,7 @@ export default function Scoreboard() {
   );
 }
 
-function GameCard({ game, odds, analysis, pending, formatTime }) {
+function GameCard({ game, odds, analysis, pending, formatTime, onReanalyze }) {
   const [expanded, setExpanded] = useState(false);
   const isLive = game.status === 'live';
   const isFinal = game.status === 'final';
@@ -482,6 +531,13 @@ function GameCard({ game, odds, analysis, pending, formatTime }) {
         <div className={styles.picksPending}>
           <span className={styles.loader}></span>
           <span>AI analyzing matchup...</span>
+        </div>
+      )}
+      {!pending && !analysis && (
+        <div className={styles.noAnalysis}>
+          <button className={styles.reAnalyzeGameBtn} onClick={onReanalyze}>
+            ⚡ Analyze This Game
+          </button>
         </div>
       )}
 
@@ -629,6 +685,9 @@ function GameCard({ game, odds, analysis, pending, formatTime }) {
                   <p>{analysis.summary}</p>
                 </div>
               )}
+              <button className={styles.reAnalyzeSmallBtn} onClick={onReanalyze}>
+                ↺ Re-analyze this game
+              </button>
             </div>
           )}
         </>
