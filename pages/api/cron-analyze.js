@@ -1,15 +1,16 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { redisGet, redisSet } from './_redis';
 
-export const config = { maxDuration: 300 };
+export const config = { maxDuration: 60 }; // 60s per invocation — analyzes ONE game
 
 const PICKS_KEY = 'mlb:picks:v3';
-const CRON_KEY = date => `mlb-cron-analysis-${date}`;
+const QUEUE_KEY = date => `mlb-queue-${date}`;
+const RESULTS_KEY = date => `mlb-cron-analysis-${date}`;
 
-// ── Inline helpers (no internal fetch needed) ─────────────────────────────
+// ── MLB data ──────────────────────────────────────────────────────────────
 
 async function getTodayGames(dateStr) {
-  const url = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${dateStr}&hydrate=team,linescore,probablePitcher,weather`;
+  const url = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${dateStr}&hydrate=team,linescore,probablePitcher`;
   const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
   if (!res.ok) return [];
   const data = await res.json();
@@ -19,131 +20,142 @@ async function getTodayGames(dateStr) {
       const state = (g.status?.abstractGameState || '').toLowerCase();
       if (state === 'final') continue;
       games.push({
-        id: g.gamePk,
+        id: String(g.gamePk),
         status: state,
-        startTime: g.gameDate,
-        home: { name: g.teams?.home?.team?.name || '', abbrev: g.teams?.home?.team?.abbreviation || '', probablePitcher: g.teams?.home?.probablePitcher?.fullName || null },
-        away: { name: g.teams?.away?.team?.name || '', abbrev: g.teams?.away?.team?.abbreviation || '', probablePitcher: g.teams?.away?.probablePitcher?.fullName || null },
+        home: {
+          name: g.teams?.home?.team?.name || '',
+          abbrev: g.teams?.home?.team?.abbreviation || '',
+          probablePitcher: g.teams?.home?.probablePitcher?.fullName || null
+        },
+        away: {
+          name: g.teams?.away?.team?.name || '',
+          abbrev: g.teams?.away?.team?.abbreviation || '',
+          probablePitcher: g.teams?.away?.probablePitcher?.fullName || null
+        },
       });
     }
   }
   return games;
 }
 
-async function getTodayOdds() {
+async function getOddsForGame(homeName) {
   const apiKey = process.env.ODDS_API_KEY;
-  if (!apiKey) return [];
+  if (!apiKey) return { homeSpread: null, total: null };
   try {
-    const url = `https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey=${apiKey}&regions=us&markets=h2h,spreads,totals&oddsFormat=american&bookmakers=draftkings,fanduel,betmgm`;
+    const url = `https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey=${apiKey}&regions=us&markets=spreads,totals&oddsFormat=american&bookmakers=draftkings`;
     const res = await fetch(url);
-    if (!res.ok) return [];
-    return await res.json();
-  } catch { return []; }
-}
-
-function matchOdds(game, oddsEvents) {
-  const norm = s => s.toLowerCase().replace(/[^a-z]/g, '');
-  const homeLast = game.home.name.split(' ').pop().toLowerCase();
-  for (const ev of oddsEvents) {
-    if (norm(ev.home_team) === norm(game.home.name) || ev.home_team.toLowerCase().includes(homeLast) || ev.away_team.toLowerCase().includes(homeLast)) {
-      const hh = ev.home_team.toLowerCase().includes(homeLast);
-      let homeSpread = null, total = null;
-      for (const bm of (ev.bookmakers || [])) {
-        for (const mkt of (bm.markets || [])) {
-          if (mkt.key === 'spreads' && homeSpread === null) {
-            const ho = mkt.outcomes.find(o => o.name === ev.home_team);
-            if (ho) homeSpread = hh ? ho.point : -ho.point;
-          }
-          if (mkt.key === 'totals' && total === null) {
-            const ov = mkt.outcomes.find(o => o.name === 'Over');
-            if (ov) total = ov.point;
-          }
+    if (!res.ok) return { homeSpread: null, total: null };
+    const events = await res.json();
+    const norm = s => s.toLowerCase().replace(/[^a-z]/g, '');
+    const homeLast = homeName.split(' ').pop().toLowerCase();
+    const ev = events.find(e => norm(e.home_team) === norm(homeName) || e.home_team.toLowerCase().includes(homeLast));
+    if (!ev) return { homeSpread: null, total: null };
+    let homeSpread = null, total = null;
+    for (const bm of (ev.bookmakers || [])) {
+      for (const mkt of (bm.markets || [])) {
+        if (mkt.key === 'spreads' && homeSpread === null) {
+          const ho = mkt.outcomes.find(o => o.name === ev.home_team);
+          if (ho) homeSpread = ho.point;
         }
-        if (homeSpread !== null && total !== null) break;
+        if (mkt.key === 'totals' && total === null) {
+          const ov = mkt.outcomes.find(o => o.name === 'Over');
+          if (ov) total = ov.point;
+        }
       }
-      return { homeSpread, total };
+      if (homeSpread !== null && total !== null) break;
     }
-  }
-  return { homeSpread: null, total: null };
+    return { homeSpread, total };
+  } catch { return { homeSpread: null, total: null }; }
 }
 
-async function analyzeGame(game, odds, dateStr) {
-  const client = new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY,
-    defaultHeaders: { 'anthropic-beta': 'web-search-2025-03-05' }
-  });
+// ── Analysis ──────────────────────────────────────────────────────────────
 
+async function analyzeOneGame(game, odds, dateStr) {
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
   const spreadInfo = odds.homeSpread != null
-    ? `Spread: ${game.home.name} ${odds.homeSpread > 0 ? '+' : ''}${odds.homeSpread} / ${game.away.name} ${odds.homeSpread >= 0 ? '-' : '+'}${Math.abs(odds.homeSpread)}`
+    ? `Spread: ${game.home.name} ${odds.homeSpread > 0 ? '+' : ''}${odds.homeSpread} / ${game.away.name} ${odds.homeSpread <= 0 ? '+' : '-'}${Math.abs(odds.homeSpread)}`
     : 'No spread line yet';
   const totalInfo = odds.total != null ? `O/U: ${odds.total}` : 'No total yet';
   const pitcherInfo = (game.away.probablePitcher || game.home.probablePitcher)
     ? `Probable starters: ${game.away.abbrev} ${game.away.probablePitcher || 'TBD'} vs ${game.home.abbrev} ${game.home.probablePitcher || 'TBD'}`
     : '';
 
-  const systemPrompt = `You are a sharp MLB betting analyst for the 2026 regular season. Make a pick on BOTH spread and total — never PASS. Low conviction = confidence 1-3.
+  const systemPrompt = `You are a sharp MLB betting analyst for the 2026 regular season. Make a pick on BOTH spread and total — never PASS. Low conviction = confidence 1-3. Only use 2026 regular season data. Never use spring training or 2025 data. Find VALUE: public bets favorites/overs, sharp money fades the public.
 
-CRITICAL: Use ONLY 2026 regular season data. Search for TODAY's confirmed lineups, injuries, and pitcher info. Never use spring training or 2025 data.
+Return ONLY valid JSON (no markdown, no backticks):
+{"spread":{"pick":"FULL TEAM NAME","pickSide":"away or home","line":"-1.5","confidence":7,"edge":"Specific reason."},"total":{"pick":"OVER or UNDER","line":8.5,"confidence":6,"predictedRuns":7.2,"edge":"Specific reason."},"predictedScore":{"away":4,"home":3},"pitchers":{"away":{"name":"name","era":"x.xx","note":"recent form"},"home":{"name":"name","era":"x.xx","note":"recent form"}},"keyInjuries":[{"team":"away or home","player":"name","status":"IL10","impact":"high"}],"topFactors":[{"label":"label","detail":"one sentence","side":"away or home or over or under or neutral"}],"teamStats":{"away":{"record":"W-L","last10":"W-L","rpg":"x.x","era":"x.xx","ops":".xxx"},"home":{"record":"W-L","last10":"W-L","rpg":"x.x","era":"x.xx","ops":".xxx"}},"weather":"ballpark, wind, temp","summary":"2 sharp sentences."}`;
 
-Find VALUE: public bets favorites/overs, sharp money fades the public. Big-market teams (NYY, LAD, BOS, CHC) lines are inflated. Road +1.5 covers 50%+ historically.
+  const userMessage = `TODAY: ${today}. 2026 MLB regular season is underway.
 
-Return ONLY valid JSON:
-{"spread":{"pick":"FULL TEAM NAME","pickSide":"away or home","line":"-1.5","confidence":7,"edge":"Specific reason with live data."},"total":{"pick":"OVER or UNDER","line":8.5,"confidence":6,"predictedRuns":7.2,"edge":"Specific reason."},"predictedScore":{"away":4,"home":3},"pitchers":{"away":{"name":"name","era":"era","note":"recent form"},"home":{"name":"name","era":"era","note":"recent form"}},"keyInjuries":[{"team":"away or home","player":"name","status":"IL10","impact":"high"}],"topFactors":[{"label":"label","detail":"detail","side":"away or home or over or under or neutral"}],"teamStats":{"away":{"record":"W-L","last10":"W-L","rpg":"x.x","era":"x.xx","ops":".xxx"},"home":{"record":"W-L","last10":"W-L","rpg":"x.x","era":"x.xx","ops":".xxx"}},"weather":"ballpark, wind, temp","summary":"2 sharp sentences on value."}`;
-
-  const userMessage = `TODAY: ${today}. 2026 MLB regular season.
-
-Search for latest data then analyze:
+Search for current data then analyze:
 ${game.away.name} @ ${game.home.name} — ${dateStr}
 ${pitcherInfo}
 ${spreadInfo}
 ${totalInfo}
 
-Search: confirmed starters, injury reports, 2026 team stats, weather. Pick both spread and total. Return JSON only.`;
+Search for: confirmed starters, injury reports, 2026 team stats, weather. Pick both spread and total. Return JSON only.`;
 
-  const message = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 2000,
-    tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-    system: systemPrompt,
-    messages: [{ role: 'user', content: userMessage }]
-  });
-
-  let fullText = '';
-  for (const block of (message.content || [])) {
-    if (block.type === 'text') fullText += block.text;
-  }
-  fullText = fullText.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-  const match = fullText.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('No JSON in response');
-
-  // Try parsing as-is first
+  // Try Sonnet with web search first
   try {
-    return JSON.parse(match[0]);
-  } catch (parseErr) {
-    // Attempt to fix common JSON issues: trailing commas, unescaped quotes in strings
-    let fixed = match[0]
-      .replace(/,\s*([}\]])/g, '$1')  // trailing commas
-      .replace(/([^\\])'([^']*)'(\s*[,}\]])/g, '$1"$2"$3'); // single quotes
-    try {
-      return JSON.parse(fixed);
-    } catch {
-      throw new Error('JSON parse failed: ' + parseErr.message + ' | Raw: ' + match[0].slice(0, 200));
+    const client = new Anthropic({
+      apiKey: process.env.ANTHROPIC_API_KEY,
+      defaultHeaders: { 'anthropic-beta': 'web-search-2025-03-05' }
+    });
+    const message = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 2000,
+      tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userMessage }]
+    });
+    let text = '';
+    for (const block of (message.content || [])) {
+      if (block.type === 'text') text += block.text;
     }
+    return parseResult(text);
+  } catch (e) {
+    // Rate limit or error — fall back to Haiku
+    console.log(`Sonnet failed (${e.status}), using Haiku`);
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const message = await client.messages.create({
+      model: 'claude-haiku-4-5',
+      max_tokens: 1000,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: `${game.away.name} @ ${game.home.name} on ${dateStr}. ${spreadInfo}. ${totalInfo}. Pick both, return JSON only.` }]
+    });
+    return parseResult(message.content?.[0]?.text || '');
   }
+}
+
+function parseResult(text) {
+  text = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('No JSON in response');
+  // Try direct parse, then repair trailing commas
+  try { return JSON.parse(match[0]); } catch {
+    const fixed = match[0].replace(/,(\s*[}\]])/g, '$1');
+    return JSON.parse(fixed);
+  }
+}
+
+function sanitize(result, game) {
+  if (!result.spread?.pickSide || ['pass','PASS'].includes(result.spread.pickSide)) {
+    result.spread = { ...result.spread, pickSide: 'away', pick: game.away.name, confidence: 2, edge: 'Low conviction — away +1.5 value.' };
+  }
+  if (!result.total?.pick || ['PASS','pass'].includes(result.total.pick)) {
+    result.total = { ...result.total, pick: 'UNDER', confidence: 2, edge: 'Low conviction — default under.' };
+  }
+  return result;
 }
 
 // ── Main handler ──────────────────────────────────────────────────────────
 
 export default async function handler(req, res) {
-  // Auth: accept Vercel's cron header OR our own CRON_SECRET
+  // Auth: Vercel cron header OR CRON_SECRET
   const secret = process.env.CRON_SECRET;
-  const authHeader = req.headers.authorization || '';
-  const validVercelCron = req.headers['x-vercel-cron'] === '1';
-  const validSecret = secret && authHeader === `Bearer ${secret}`;
-  const noSecretSet = !secret; // if no secret configured, allow all (dev mode)
-
-  if (!validVercelCron && !validSecret && !noSecretSet) {
+  const isVercelCron = req.headers['x-vercel-cron'] === '1';
+  const hasSecret = secret && req.headers.authorization === `Bearer ${secret}`;
+  if (!isVercelCron && !hasSecret && secret) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
@@ -152,90 +164,85 @@ export default async function handler(req, res) {
     const central = new Date(now.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
     const dateStr = `${central.getFullYear()}-${String(central.getMonth()+1).padStart(2,'0')}-${String(central.getDate()).padStart(2,'0')}`;
 
-    console.log(`Cron starting for ${dateStr}`);
+    // ── Step 1: Check if queue exists, if not build it ──
+    let queue = await redisGet(QUEUE_KEY(dateStr));
 
-    const [games, oddsEvents] = await Promise.all([getTodayGames(dateStr), getTodayOdds()]);
-    const schedulable = games.filter(g => g.status !== 'final');
-
-    if (!schedulable.length) {
-      return res.status(200).json({ message: 'No games to analyze', date: dateStr });
+    if (!queue || !Array.isArray(queue) || queue.length === 0) {
+      // Build queue from today's games
+      console.log(`Building queue for ${dateStr}`);
+      const games = await getTodayGames(dateStr);
+      if (!games.length) {
+        return res.status(200).json({ message: 'No games today', date: dateStr });
+      }
+      queue = games.map(g => ({ ...g, queued: true }));
+      await redisSet(QUEUE_KEY(dateStr), queue);
+      console.log(`Queued ${queue.length} games`);
     }
 
-    // Load existing picks to avoid re-saving duplicates
-    const existingPicks = await redisGet(PICKS_KEY) || [];
-    const allPicks = [...existingPicks];
-    const cronResults = {};
-    let analyzed = 0, failed = 0;
+    // ── Step 2: Process next unanalyzed game ──
+    const nextGame = queue.find(g => g.queued);
+    if (!nextGame) {
+      return res.status(200).json({ message: 'All games analyzed', date: dateStr });
+    }
 
-    for (let i = 0; i < schedulable.length; i++) {
-      const game = schedulable[i];
-      if (i > 0) await new Promise(r => setTimeout(r, 8000));
+    console.log(`Analyzing: ${nextGame.away.name} @ ${nextGame.home.name}`);
 
-      try {
-        const odds = matchOdds(game, oddsEvents);
-        let result;
-        try {
-          result = await analyzeGame(game, odds, dateStr);
-        } catch (analyzeErr) {
-          console.error(`Sonnet failed for ${game.away.name} @ ${game.home.name}: ${analyzeErr.message} — trying Haiku fallback`);
-          // Fallback: Haiku without web search
-          const fallbackClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-          const fb = await fallbackClient.messages.create({
-            model: 'claude-haiku-4-5',
-            max_tokens: 1000,
-            system: 'You are an MLB betting analyst. Return ONLY valid JSON, no markdown. Pick both spread and total, never PASS. Use confidence 1-3 for low conviction. Format: {"spread":{"pick":"TEAM","pickSide":"away or home","line":"-1.5","confidence":5,"edge":"reason"},"total":{"pick":"OVER or UNDER","line":8.5,"confidence":5,"predictedRuns":7.0,"edge":"reason"},"predictedScore":{"away":3,"home":2},"pitchers":{"away":{"name":"TBD","era":"0.00","note":""},"home":{"name":"TBD","era":"0.00","note":""}},"keyInjuries":[],"topFactors":[],"teamStats":{"away":{"record":"0-0","last10":"0-0","rpg":"0.0","era":"0.00","ops":".000"},"home":{"record":"0-0","last10":"0-0","rpg":"0.0","era":"0.00","ops":".000"}},"weather":"unknown","summary":"Limited data."}',
-            messages: [{ role: 'user', content: `${game.away.name} @ ${game.home.name} on ${dateStr}. Return JSON only.` }]
-          });
-          const fbText = (fb.content?.[0]?.text || '').replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim();
-          const fbMatch = fbText.match(/\{[\s\S]*\}/);
-          if (!fbMatch) throw new Error('Haiku fallback also failed');
-          result = JSON.parse(fbMatch[0]);
+    // Mark as in-progress
+    const updatedQueue = queue.map(g => g.id === nextGame.id ? { ...g, queued: false, processing: true } : g);
+    await redisSet(QUEUE_KEY(dateStr), updatedQueue);
+
+    // Get odds and analyze
+    const odds = await getOddsForGame(nextGame.home.name);
+    let result;
+    try {
+      result = sanitize(await analyzeOneGame(nextGame, odds, dateStr), nextGame);
+    } catch (e) {
+      console.error(`Analysis failed for ${nextGame.away.name} @ ${nextGame.home.name}:`, e.message);
+      result = { error: e.message };
+    }
+
+    // ── Step 3: Save result ──
+    const existingResults = await redisGet(RESULTS_KEY(dateStr)) || { results: {}, date: dateStr };
+    existingResults.results[nextGame.id] = { ...result, analyzedAt: new Date().toISOString() };
+    existingResults.analyzedAt = new Date().toISOString();
+
+    // Save picks to Redis
+    if (result && !result.error) {
+      const existingPicks = await redisGet(PICKS_KEY) || [];
+      const picksToSave = [];
+      if (result.spread?.pickSide && result.spread?.pick) {
+        picksToSave.push({ gameId: nextGame.id, gameDate: dateStr, awayTeam: nextGame.away.name, homeTeam: nextGame.home.name, awayAbbrev: nextGame.away.abbrev, homeAbbrev: nextGame.home.abbrev, pickType: 'spread', pick: result.spread.pick, pickSide: result.spread.pickSide, line: result.spread.line, confidence: result.spread.confidence, edge: result.spread.edge, result: 'pending', savedAt: new Date().toISOString() });
+      }
+      if (result.total?.pick && !['PASS','pass'].includes(result.total.pick)) {
+        picksToSave.push({ gameId: nextGame.id, gameDate: dateStr, awayTeam: nextGame.away.name, homeTeam: nextGame.home.name, awayAbbrev: nextGame.away.abbrev, homeAbbrev: nextGame.home.abbrev, pickType: 'total', pick: result.total.pick, line: result.total.line, confidence: result.total.confidence, edge: result.total.edge, result: 'pending', savedAt: new Date().toISOString() });
+      }
+      if (picksToSave.length) {
+        const allPicks = [...existingPicks];
+        for (const pick of picksToSave) {
+          const idx = allPicks.findIndex(p => String(p.gameId) === String(nextGame.id) && p.pickType === pick.pickType);
+          if (idx >= 0 && allPicks[idx].result === 'pending') allPicks[idx] = pick;
+          else if (idx === -1) allPicks.push(pick);
         }
-
-        // Sanitize PASS
-        if (!result.spread?.pickSide || ['pass','PASS'].includes(result.spread.pickSide)) {
-          result.spread = { ...result.spread, pickSide: 'away', pick: game.away.name, confidence: 2, edge: 'Low conviction — away +1.5 default value.' };
-        }
-        if (!result.total?.pick || ['PASS','pass'].includes(result.total.pick)) {
-          result.total = { ...result.total, pick: 'UNDER', confidence: 2, edge: 'Low conviction — default under.' };
-        }
-
-        cronResults[game.id] = { ...result, analyzedAt: new Date().toISOString() };
-        analyzed++;
-
-        // Save picks (upsert — replace pending picks for this game)
-        const newPicks = [];
-        if (result.spread?.pickSide && result.spread?.pick) {
-          newPicks.push({ gameId: String(game.id), gameDate: dateStr, awayTeam: game.away.name, homeTeam: game.home.name, awayAbbrev: game.away.abbrev, homeAbbrev: game.home.abbrev, pickType: 'spread', pick: result.spread.pick, pickSide: result.spread.pickSide, line: result.spread.line, confidence: result.spread.confidence, edge: result.spread.edge, result: 'pending', savedAt: new Date().toISOString() });
-        }
-        if (result.total?.pick && !['PASS','pass'].includes(result.total.pick)) {
-          newPicks.push({ gameId: String(game.id), gameDate: dateStr, awayTeam: game.away.name, homeTeam: game.home.name, awayAbbrev: game.away.abbrev, homeAbbrev: game.home.abbrev, pickType: 'total', pick: result.total.pick, line: result.total.line, confidence: result.total.confidence, edge: result.total.edge, result: 'pending', savedAt: new Date().toISOString() });
-        }
-
-        for (const pick of newPicks) {
-          const idx = allPicks.findIndex(p => String(p.gameId) === String(game.id) && p.pickType === pick.pickType);
-          if (idx >= 0 && allPicks[idx].result === 'pending') {
-            allPicks[idx] = pick; // update pending pick with fresh analysis
-          } else if (idx === -1) {
-            allPicks.push(pick);
-          }
-        }
-
-      } catch (e) {
-        console.error(`Failed: ${game.away.name} @ ${game.home.name}:`, e.message);
-        cronResults[game.id] = { error: e.message };
-        failed++;
+        await redisSet(PICKS_KEY, allPicks);
       }
     }
 
-    // Save everything to Redis
+    // Mark game as done in queue
+    const finalQueue = updatedQueue.map(g => g.id === nextGame.id ? { ...g, processing: false, done: true, queued: false } : g);
     await Promise.all([
-      redisSet(PICKS_KEY, allPicks),
-      redisSet(CRON_KEY(dateStr), { results: cronResults, analyzedAt: new Date().toISOString(), date: dateStr })
+      redisSet(QUEUE_KEY(dateStr), finalQueue),
+      redisSet(RESULTS_KEY(dateStr), existingResults)
     ]);
 
-    console.log(`Cron done: ${analyzed} analyzed, ${failed} failed`);
-    res.status(200).json({ date: dateStr, total: schedulable.length, analyzed, failed });
+    const remaining = finalQueue.filter(g => g.queued).length;
+    console.log(`Done: ${nextGame.away.name} @ ${nextGame.home.name}. ${remaining} games remaining.`);
+
+    res.status(200).json({
+      date: dateStr,
+      analyzed: `${nextGame.away.name} @ ${nextGame.home.name}`,
+      remaining,
+      done: remaining === 0
+    });
 
   } catch (e) {
     console.error('Cron error:', e.message);
