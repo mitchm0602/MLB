@@ -1,7 +1,7 @@
 {
   "functions": {
     "pages/api/analyze.js": { "maxDuration": 120 },
-    "pages/api/cron-analyze.js": { "maxDuration": 300 },
+    "pages/api/cron-analyze.js": { "maxDuration": 60 },
     "pages/api/scores.js": { "maxDuration": 15 },
     "pages/api/odds.js": { "maxDuration": 15 },
     "pages/api/grade.js": { "maxDuration": 30 },
@@ -9,9 +9,21 @@
     "pages/api/cron-cache.js": { "maxDuration": 10 }
   },
   "crons": [
-    {
-      "path": "/api/cron-analyze",
-      "schedule": "0 19 * * *"
-    }
+    { "path": "/api/cron-analyze", "schedule": "0 19 * * *" },
+    { "path": "/api/cron-analyze", "schedule": "5 19 * * *" },
+    { "path": "/api/cron-analyze", "schedule": "10 19 * * *" },
+    { "path": "/api/cron-analyze", "schedule": "15 19 * * *" },
+    { "path": "/api/cron-analyze", "schedule": "20 19 * * *" },
+    { "path": "/api/cron-analyze", "schedule": "25 19 * * *" },
+    { "path": "/api/cron-analyze", "schedule": "30 19 * * *" },
+    { "path": "/api/cron-analyze", "schedule": "35 19 * * *" },
+    { "path": "/api/cron-analyze", "schedule": "40 19 * * *" },
+    { "path": "/api/cron-analyze", "schedule": "45 19 * * *" },
+    { "path": "/api/cron-analyze", "schedule": "50 19 * * *" },
+    { "path": "/api/cron-analyze", "schedule": "55 19 * * *" },
+    { "path": "/api/cron-analyze", "schedule": "0 20 * * *" },
+    { "path": "/api/cron-analyze", "schedule": "5 20 * * *" },
+    { "path": "/api/cron-analyze", "schedule": "10 20 * * *" },
+    { "path": "/api/cron-analyze", "schedule": "15 20 * * *" }
   ]
 }
