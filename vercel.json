@@ -5,7 +5,8 @@
     "pages/api/scores.js": { "maxDuration": 15 },
     "pages/api/odds.js": { "maxDuration": 15 },
     "pages/api/grade.js": { "maxDuration": 30 },
-    "pages/api/picks.js": { "maxDuration": 15 }
+    "pages/api/picks.js": { "maxDuration": 15 },
+    "pages/api/cron-cache.js": { "maxDuration": 10 }
   },
   "crons": [
     {
