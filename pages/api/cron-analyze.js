@@ -183,8 +183,7 @@ export default async function handler(req, res) {
           const fb = await fallbackClient.messages.create({
             model: 'claude-haiku-4-5',
             max_tokens: 1000,
-            system: 'You are an MLB betting analyst. Return ONLY valid JSON, no markdown. Pick both spread and total, never PASS. Use confidence 1-3 for low conviction.
-{"spread":{"pick":"TEAM","pickSide":"away or home","line":"-1.5","confidence":5,"edge":"reason"},"total":{"pick":"OVER or UNDER","line":8.5,"confidence":5,"predictedRuns":7.0,"edge":"reason"},"predictedScore":{"away":3,"home":2},"pitchers":{"away":{"name":"TBD","era":"—","note":""},"home":{"name":"TBD","era":"—","note":""}},"keyInjuries":[],"topFactors":[],"teamStats":{"away":{"record":"—","last10":"—","rpg":"—","era":"—","ops":"—"},"home":{"record":"—","last10":"—","rpg":"—","era":"—","ops":"—"}},"weather":"—","summary":"Limited data available."}',
+            system: 'You are an MLB betting analyst. Return ONLY valid JSON, no markdown. Pick both spread and total, never PASS. Use confidence 1-3 for low conviction. Format: {"spread":{"pick":"TEAM","pickSide":"away or home","line":"-1.5","confidence":5,"edge":"reason"},"total":{"pick":"OVER or UNDER","line":8.5,"confidence":5,"predictedRuns":7.0,"edge":"reason"},"predictedScore":{"away":3,"home":2},"pitchers":{"away":{"name":"TBD","era":"0.00","note":""},"home":{"name":"TBD","era":"0.00","note":""}},"keyInjuries":[],"topFactors":[],"teamStats":{"away":{"record":"0-0","last10":"0-0","rpg":"0.0","era":"0.00","ops":".000"},"home":{"record":"0-0","last10":"0-0","rpg":"0.0","era":"0.00","ops":".000"}},"weather":"unknown","summary":"Limited data."}',
             messages: [{ role: 'user', content: `${game.away.name} @ ${game.home.name} on ${dateStr}. Return JSON only.` }]
           });
           const fbText = (fb.content?.[0]?.text || '').replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim();
