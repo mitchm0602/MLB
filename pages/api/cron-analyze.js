@@ -116,7 +116,21 @@ Search: confirmed starters, injury reports, 2026 team stats, weather. Pick both 
   fullText = fullText.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
   const match = fullText.match(/\{[\s\S]*\}/);
   if (!match) throw new Error('No JSON in response');
-  return JSON.parse(match[0]);
+
+  // Try parsing as-is first
+  try {
+    return JSON.parse(match[0]);
+  } catch (parseErr) {
+    // Attempt to fix common JSON issues: trailing commas, unescaped quotes in strings
+    let fixed = match[0]
+      .replace(/,\s*([}\]])/g, '$1')  // trailing commas
+      .replace(/([^\\])'([^']*)'(\s*[,}\]])/g, '$1"$2"$3'); // single quotes
+    try {
+      return JSON.parse(fixed);
+    } catch {
+      throw new Error('JSON parse failed: ' + parseErr.message + ' | Raw: ' + match[0].slice(0, 200));
+    }
+  }
 }
 
 // ── Main handler ──────────────────────────────────────────────────────────
@@ -159,7 +173,25 @@ export default async function handler(req, res) {
 
       try {
         const odds = matchOdds(game, oddsEvents);
-        const result = await analyzeGame(game, odds, dateStr);
+        let result;
+        try {
+          result = await analyzeGame(game, odds, dateStr);
+        } catch (analyzeErr) {
+          console.error(`Sonnet failed for ${game.away.name} @ ${game.home.name}: ${analyzeErr.message} — trying Haiku fallback`);
+          // Fallback: Haiku without web search
+          const fallbackClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+          const fb = await fallbackClient.messages.create({
+            model: 'claude-haiku-4-5',
+            max_tokens: 1000,
+            system: 'You are an MLB betting analyst. Return ONLY valid JSON, no markdown. Pick both spread and total, never PASS. Use confidence 1-3 for low conviction.
+{"spread":{"pick":"TEAM","pickSide":"away or home","line":"-1.5","confidence":5,"edge":"reason"},"total":{"pick":"OVER or UNDER","line":8.5,"confidence":5,"predictedRuns":7.0,"edge":"reason"},"predictedScore":{"away":3,"home":2},"pitchers":{"away":{"name":"TBD","era":"—","note":""},"home":{"name":"TBD","era":"—","note":""}},"keyInjuries":[],"topFactors":[],"teamStats":{"away":{"record":"—","last10":"—","rpg":"—","era":"—","ops":"—"},"home":{"record":"—","last10":"—","rpg":"—","era":"—","ops":"—"}},"weather":"—","summary":"Limited data available."}',
+            messages: [{ role: 'user', content: `${game.away.name} @ ${game.home.name} on ${dateStr}. Return JSON only.` }]
+          });
+          const fbText = (fb.content?.[0]?.text || '').replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim();
+          const fbMatch = fbText.match(/\{[\s\S]*\}/);
+          if (!fbMatch) throw new Error('Haiku fallback also failed');
+          result = JSON.parse(fbMatch[0]);
+        }
 
         // Sanitize PASS
         if (!result.spread?.pickSide || ['pass','PASS'].includes(result.spread.pickSide)) {
