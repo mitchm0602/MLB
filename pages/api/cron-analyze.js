@@ -122,9 +122,14 @@ Search: confirmed starters, injury reports, 2026 team stats, weather. Pick both 
 // ── Main handler ──────────────────────────────────────────────────────────
 
 export default async function handler(req, res) {
-  // Accept GET (Vercel cron) or POST (manual trigger)
+  // Auth: accept Vercel's cron header OR our own CRON_SECRET
   const secret = process.env.CRON_SECRET;
-  if (secret && req.headers.authorization !== `Bearer ${secret}`) {
+  const authHeader = req.headers.authorization || '';
+  const validVercelCron = req.headers['x-vercel-cron'] === '1';
+  const validSecret = secret && authHeader === `Bearer ${secret}`;
+  const noSecretSet = !secret; // if no secret configured, allow all (dev mode)
+
+  if (!validVercelCron && !validSecret && !noSecretSet) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
